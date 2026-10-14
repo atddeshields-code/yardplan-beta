@@ -1,0 +1,14 @@
+.ypg{font:14px/1.45 system-ui,sans-serif;color:#1d2a1d;max-width:1100px;margin:auto}
+.ypg-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;flex-wrap:wrap}.ypg-head h2{margin:0}.ypg-sub{color:#556;font-size:13px}
+.ypg button{border:1px solid #2f6b2f;background:#fff;color:#2f6b2f;border-radius:8px;padding:6px 12px;cursor:pointer;margin-left:4px}
+.ypg-tabs{margin:14px 0;border-bottom:1px solid #ccd}.ypg-tabs button{border-radius:8px 8px 0 0;margin:0}.ypg-tabs [aria-selected=true]{background:#2f6b2f;color:#fff}
+.ypg-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:10px 0}.ypg-card{background:#f3f7ee;border-radius:10px;padding:10px}.ypg-card b{display:block;font-size:22px;text-transform:capitalize}.ypg-card span{font-size:12px;color:#556}
+.ypg-level-easy b{color:#2a8a2a}.ypg-level-moderate b{color:#b07a00}.ypg-level-high b{color:#b02a2a}
+.ypg-plan{display:flex;gap:14px;flex-wrap:wrap}.ypg-plan canvas{max-width:100%;border:1px solid #dde;border-radius:8px;background:#fff}.ypg-legend{list-style:none;padding:0;font-size:13px}.ypg-legend i,.dot{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.ypg-t{border-collapse:collapse;width:100%;margin:6px 0 12px}.ypg-t th,.ypg-t td{border-bottom:1px solid #e3e6e0;padding:4px 6px;text-align:left;vertical-align:top}.ypg-small{font-size:12px}.ypg-small small{color:#778}
+.ypg-note{background:#fff8e1;border-radius:8px;padding:8px 12px}.ypg-warn{color:#8a5a00}.ypg-disc{font-size:12px;color:#667;border-top:1px solid #dde;padding-top:8px}
+.ypg-cal{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}.ypg-month{background:#fafbf8;border:1px solid #e3e6e0;border-radius:10px;padding:8px}.ypg-month h4{margin:0 0 6px}
+.ypg-task{border-left:4px solid #8a8;padding:3px 6px;margin:4px 0;background:#fff}.ypg-task b{display:block;font-size:13px}.ypg-task small{color:#667}.ypg-task p{margin:2px 0;font-size:12px;color:#445}
+.c-irrigation{border-color:#2b8cbe}.c-pruning{border-color:#31a354}.c-lawn{border-color:#7fc97f}.c-weeds{border-color:#e6550d}.c-hardscape{border-color:#8c6d31}.c-mulch{border-color:#a47a55}.c-pestdisease{border-color:#de2d26}.c-fertilizing{border-color:#756bb1}
+@media print{.noprint{display:none!important}.ypg [data-panel]{display:block!important}.ypg-month,.ypg-t tr{break-inside:avoid}.ypg-plan canvas{max-width:6.5in}body{margin:0}}
+.ypg-ok{color:#2a7a2a}.ypg-unv{color:#a05a00}.ypg-note hr{border:0;border-top:1px solid #e8dcae}
