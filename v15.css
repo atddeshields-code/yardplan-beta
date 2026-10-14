@@ -1,0 +1,79 @@
+/* v15: simplified homeowner flow (photo → look → your yard). Pro mode styles are untouched. */
+/* Homeowners: no tab bar, no zone pill, no More tab. "My plans" + menu appear in the top bar after the first save. */
+body[data-mode=home] #nav,body[data-mode=home] #zonePill{display:none!important}
+body[data-mode=pro] .hnav{display:none!important}
+.hnav{display:flex;gap:var(--space-2);align-items:center}.hnav[hidden]{display:none}
+.hnav .pill{min-height:36px}
+@media (max-width:1023px){body[data-mode=home]{padding-bottom:0}body[data-mode=home] .flowbar{bottom:0}}
+/* contractor-only tools hidden for homeowners (still in Pro: Site plan, Photo tools, Materials, Care → water pressure, MWELO) */
+body[data-mode=home] .careadj,body[data-mode=home] .mwelo-card,body[data-mode=home] #careTools{display:none!important}
+/* 3-part progress */
+.prog{margin:var(--space-2) 0 var(--space-6)}
+.prog ol{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;list-style:none;margin:0;padding:0}
+.prog li{display:flex;flex-direction:column;gap:6px;font-size:var(--text-footnote);color:var(--text-subtle)}
+.prog li i{display:block;height:4px;border-radius:2px;background:var(--border-strong,rgba(127,127,127,.3))}
+.prog li.is-done i,.prog li.is-current i{background:var(--accent,#00a804)}
+.prog li.is-current{color:var(--text);font-weight:600}
+/* step 1 */
+.hero1{margin-bottom:var(--space-8)}.hero1 .ba{margin:var(--space-4) 0 0}.hero1 .eyebrow{margin:0}
+.drop.has b{background:rgba(0,0,0,.55);color:#fff;padding:2px 10px;border-radius:999px}.drop.has span{background:rgba(0,0,0,.55);color:#fff;padding:2px 10px;border-radius:999px}
+.zipfield .input{max-width:12ch;font-size:20px;letter-spacing:.06em}
+.alts{margin:var(--space-6) 0 0;font-size:var(--text-callout)}.alts .linkbtn{font-size:inherit;min-height:44px}
+#fAddrBox{margin-top:var(--space-2)}
+.s1foot{margin-top:var(--space-8);color:var(--text-subtle)}
+/* sticky bar */
+.flowbar{flex-direction:column;gap:4px}
+.flowbar__row{display:flex;gap:var(--space-2);align-items:center;width:100%}
+.flowbar__help{margin:0;text-align:center;font-size:var(--text-footnote);color:var(--text-muted)}
+.flowbar__note{margin:0;text-align:center;font-size:12px;line-height:1.35;color:var(--text-muted)}
+.flowbar__help[hidden],.flowbar__note[hidden]{display:none}
+#fNext.is-disabled{opacity:.45;cursor:not-allowed}
+.fprice{margin:0;font:700 20px/1.1 var(--font-sans);white-space:nowrap;color:var(--text)}.fprice small{display:block;font:500 11px/1 var(--font-sans);color:var(--text-muted)}
+/* step 2 */
+.budget15{margin:0 0 var(--space-6)}.budget15 #bL{margin:0 0 var(--space-2)}.budget15 .chips{flex-wrap:wrap}
+.budget15 #bWho{margin:var(--space-2) 0 0}
+.chip[role=radio][aria-checked=true]{background:var(--text);color:var(--bg);border-color:var(--text)}
+.fstyles{grid-template-columns:1fr 1fr!important;gap:var(--space-3)}
+@media (min-width:900px){.fstyles{grid-template-columns:repeat(3,1fr)!important}}
+.fsc .card__media{aspect-ratio:4/3;width:100%;height:auto;object-fit:cover}
+.fsc .card__body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:2px}
+.fsc .card__title{font-size:16px}
+.fsc .fsc__cost{font-weight:600;color:var(--success,#0a7d24)}.fsc .fsc__cost.is-over{color:var(--warning-text,#9a5b00)}
+#fMore{margin-top:var(--space-3)}
+/* step 3 result */
+.res{display:grid;gap:var(--space-6)}
+@media (min-width:900px){.res{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);align-items:start}.res__media{position:sticky;top:72px}}
+.res__body h1{margin:0 0 var(--space-2)}
+.price-line{font:600 var(--text-headline,18px)/1.35 var(--font-sans);margin:0}
+.price-line.is-fit{color:var(--success,#0a7d24)}.price-line.is-over{color:var(--warning-text,#9a5b00)}
+.price-line .linkbtn{font:inherit;margin-left:4px}
+.reb-line{margin:6px 0 0;font-weight:500}
+.res__btns{display:flex;gap:var(--space-2);margin:var(--space-4) 0}.res__btns .btn{flex:1}
+.rows .row{width:100%}.rows .row b::after{content:" ›";color:var(--text-subtle)}
+.render-wait__eta{display:flex;justify-content:space-between;align-items:center;margin:8px 0 0;font-size:var(--text-footnote);color:#fff}
+.render-wait__eta .linkbtn{color:#fff;text-decoration:underline;min-height:32px}
+.render-fail{margin-top:var(--space-3)}.render-fail p{margin:0 0 4px}
+.sample-banner--demo{background:#b45309!important;color:#fff!important}
+.sample-note{margin:var(--space-2) 0 0;padding:10px 12px;border-radius:var(--radius-md,12px);background:var(--warning-bg,#fff4e0);color:var(--text);font-size:var(--text-footnote)}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .sample-note{background:#3a2a10}}
+[data-theme=dark] .sample-note{background:#3a2a10}
+/* sheets */
+#adjBody{display:grid;gap:0;margin-top:var(--space-2)}
+.adj{border-top:.5px solid var(--border)}.adj:last-child{border-bottom:.5px solid var(--border)}
+.adj>summary{display:flex;justify-content:space-between;gap:12px;align-items:center;min-height:52px;cursor:pointer;font-weight:600;list-style:none}
+.adj>summary::-webkit-details-marker{display:none}.adj>summary span{font-weight:400;color:var(--text-muted);font-size:var(--text-footnote);text-align:right}
+.adj[open]>summary{color:var(--accent-text,inherit)}.adj>*:last-child{margin-bottom:var(--space-4)}
+.adj__val{font:700 28px/1 var(--font-sans);margin:0 0 8px}.adj .seg2{margin:12px 0}
+.adj .plist li.swaplist{display:block;padding:0 0 8px}
+.care-task{font-size:16px!important;line-height:1.25}
+#infoSheet .care-nums{display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:12px}
+@media (min-width:560px){#infoSheet .care-nums{grid-template-columns:repeat(3,1fr)}}
+.sheet{max-height:88dvh;overflow:auto}
+.fprice{flex:none}
+@media (max-width:1023px){.flowbar{background:var(--bg);border-top:.5px solid var(--border);padding-top:var(--space-2)}}
+@media (max-width:743px){.hero1 .display{font-size:30px;line-height:1.1;margin:4px 0 6px}.hero1 .lead{margin:0}.hero1 .ba{--ar:16/9!important;max-height:210px}.hero1{margin-bottom:var(--space-6)}}
+.hero1 .eyebrow{display:none}
+@media (max-width:743px){.hero1 .display,.hero1 .lead{display:none}.hero1 .eyebrow{display:block;margin:0 0 6px}.hero1 .ba{max-height:170px}.hero1{margin-bottom:var(--space-4)}#s1h{margin-top:0}}
+.flowbar .back{position:static;padding:0}
+#zipForm{display:flex;gap:8px;align-items:center}
+.zipgo{width:44px;height:44px;flex:none;border:0;border-radius:999px;background:var(--surface);color:var(--text-muted);display:grid;place-items:center;cursor:pointer}.zipgo svg{width:20px;height:20px}

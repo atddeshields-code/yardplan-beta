@@ -1,4 +1,6 @@
 // Plant catalog. Zone ranges = USDA hardiness zones (typical published ranges; cultivars vary).
+// v15: legacy 3D storage key migrated once to the 2D plan key.
+try{const o=localStorage.getItem("yardplan.design3d.v2");if(o&&!localStorage.getItem("yardplan.design.v3"))localStorage.setItem("yardplan.design.v3",o);localStorage.removeItem("yardplan.design3d.v2");}catch(e){}
 // sun: full | part | shade ; water: low | med | high
 const P=(id,name,sci,type,zmin,zmax,sun,water,size,native,styles,icon)=>({id,name,sci,type,zmin,zmax,sun,water,size,native,styles,icon});
 const PLANTS=[
@@ -84,7 +86,7 @@ const ZIP_FALLBACK={'95814':'9b','10001':'7b','02108':'7a','60601':'6b','55401':
 // 3D model mapping: model type, mature height & spread (ft, typical mid-range of catalog size), foliage tint, bloom color (null = none).
 // Types: decid | flowertree | conifer | palm | roundshrub | uprightshrub | grass | perennial | groundcover | succulent
 const M3=(model,h,w,leaf,bloom=null)=>({model,h,w,leaf,bloom});
-const PLANT3D={
+const PLANT_SIZE={
 redmaple:M3('decid',50,35,'#b8412e'),redbud:M3('flowertree',25,25,'#5f8a3f','#c46aa8'),dogwood:M3('flowertree',20,20,'#5f8a3f','#f4f1ea'),
 serviceberry:M3('flowertree',20,15,'#5f8a3f','#f6f3ea'),riverbirch:M3('decid',50,40,'#6f9a4a'),buroak:M3('decid',70,70,'#4f7a3a'),
 liveoak:M3('decid',50,80,'#3f6a35'),japmaple:M3('decid',15,15,'#a3342e'),crape:M3('flowertree',15,12,'#5f8a3f','#d96aa0'),
@@ -108,3 +110,5 @@ thyme:M3('groundcover',0.3,1.5,'#6a7a5a','#a07ac0'),phlox:M3('groundcover',0.5,2
 ajuga:M3('groundcover',0.5,2,'#5a3a6a','#6a6ad0'),creepjuniper:M3('groundcover',1,6,'#6a8a9a'),liriope:M3('grass',1.5,1.5,'#3f6a35'),
 mondo:M3('grass',0.8,1,'#2f4a2f'),iceplant:M3('groundcover',0.4,2,'#5a8a5a','#c84aa8'),
 };
+// Deprecated alias for one release (simplify-v15 P3 #15) so the unchanged contractor tests keep reading the old name. App code uses PLANT_SIZE.
+const PLANT3D=PLANT_SIZE;

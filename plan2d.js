@@ -1,8 +1,8 @@
 // 2D site plan editor (top-down, SVG, no WebGL). Same design format as before (v2: yard {w,d} ft, house, items with
 // kind plant|mulch|gravel|dg|path|lawn|wall|grade, x/z = center in ft from the yard center, w/d ft (plants: scale), r radians).
-// Classic globals: PLANTS, PLANT3D, CREDITS, fits, go, renderMaterials ($('#area')…).
+// Classic globals: PLANTS, PLANT_SIZE, CREDITS, fits, go, renderMaterials ($('#area')…).
 const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
-const KEY = 'yardplan.design3d.v2', NS = 'http://www.w3.org/2000/svg';
+const KEY = 'yardplan.design.v3', NS = 'http://www.w3.org/2000/svg';
 const FEAT = {
   mulch: { name: 'Mulch bed', fill: '#7a5a3c', stroke: '#5d4430' }, gravel: { name: 'Gravel', fill: '#b9b4aa', stroke: '#8f8a80', dots: true },
   dg: { name: 'Decomposed granite', fill: '#d8c29a', stroke: '#b59e73' }, path: { name: 'Paver path / patio', fill: '#cfc6b8', stroke: '#9d9384', pavers: true },
@@ -16,7 +16,7 @@ const defaultHouse = () => ({ x: -yard.w / 2 - 3, z: -2, side: 'left', isDefault
 const getHouse = () => house || defaultHouse();
 function setHouse(h) { house = h ? { x: h.x, z: h.z, side: h.side || (Math.abs(h.x) / yard.w > Math.abs(h.z) / yard.d ? (h.x < 0 ? 'left' : 'right') : (h.z < 0 ? 'back' : 'front')) } : null; draw(); window.dispatchEvent(new Event('yardplan:design')); }
 function manifold() { const h = getHouse(); return { x: +Math.max(-yard.w / 2 + 1.5, Math.min(yard.w / 2 - 1.5, h.x)).toFixed(2), z: +Math.max(-yard.d / 2 + 1.5, Math.min(yard.d / 2 - 1.5, h.z)).toFixed(2) }; }
-const plantW = it => (PLANT3D[it.id]?.w || 3) * (it.w || 1);
+const plantW = it => (PLANT_SIZE[it.id]?.w || 3) * (it.w || 1);
 const el = (tag, a = {}, kids = []) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); kids.forEach(c => e.appendChild(c)); return e; };
 const txt = (s, a) => { const t = el('text', a); t.textContent = s; return t; };
 const ft = v => `${Math.round(v * 10) / 10} ft`;
@@ -102,9 +102,9 @@ svg.addEventListener('pointercancel', () => { drag = null; });
 function select(it) { selected = it; const s = !!it; $$('.pl-edit').forEach(b => b.disabled = !s); $('#plSel').textContent = it ? (it.kind === 'plant' ? `${PLANTS.find(p => p.id === it.id)?.name} · ${ft(plantW(it))} wide` : `${FEAT[it.kind]?.name || it.kind} · ${ft(it.w)} × ${ft(it.d)}`) : 'Nothing selected';
   const w = it?.kind === 'wall'; $('#plWallEd').hidden = !w; if (w) { $('#plWallH').value = it.h; $('#plWallF').value = it.footing; $('#plWallS').value = it.surcharge || ''; } draw(); }
 function hint(t) { $('#plHint').textContent = t; }
-function setPlacing(id) { placing = id; placingHouse = false; $('#plHouse').classList.remove('on'); $$('#palette3d button').forEach(b => b.classList.toggle('on', b.dataset.id === id)); hint(id ? `Tap the plan to place ${PLANTS.find(p => p.id === id).name}. Tap it again below to stop.` : 'Tap a plant below, then tap the plan. Drag anything to move it.'); }
-function renderPalette() { $('#palette3d').innerHTML = PLANTS.filter(p => typeof fits !== 'function' || fits(p)).map(p => `<button data-id="${p.id}" class="${p.id === placing ? 'on' : ''}">${CREDITS[p.id] ? `<img src="img/plants/${p.id}.jpg" alt="" loading="lazy">` : `<span class="fbr">${p.icon}</span>`}${p.name}<small>${PLANT3D[p.id]?.w || '?'} ft wide</small></button>`).join(''); }
-$('#palette3d').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setPlacing(placing === b.dataset.id ? null : b.dataset.id); });
+function setPlacing(id) { placing = id; placingHouse = false; $('#plHouse').classList.remove('on'); $$('#paletteSite button').forEach(b => b.classList.toggle('on', b.dataset.id === id)); hint(id ? `Tap the plan to place ${PLANTS.find(p => p.id === id).name}. Tap it again below to stop.` : 'Tap a plant below, then tap the plan. Drag anything to move it.'); }
+function renderPalette() { $('#paletteSite').innerHTML = PLANTS.filter(p => typeof fits !== 'function' || fits(p)).map(p => `<button data-id="${p.id}" class="${p.id === placing ? 'on' : ''}">${CREDITS[p.id] ? `<img src="img/plants/${p.id}.jpg" alt="" loading="lazy">` : `<span class="fbr">${p.icon}</span>`}${p.name}<small>${PLANT_SIZE[p.id]?.w || '?'} ft wide</small></button>`).join(''); }
+$('#paletteSite').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setPlacing(placing === b.dataset.id ? null : b.dataset.id); });
 function addFeature(kind, x, z, w, d) { const it = { uid: uid(), kind, x, z, w, d, r: 0, ...(kind === 'wall' ? { h: 2.5, footing: .5, surcharge: false } : {}) }; items.push(it); setPlacing(null); select(it); changed(); }
 $('#plPath').onclick = () => addFeature('path', 0, yard.d * .25, Math.min(16, yard.w * .5), 4);
 $('#plMulch').onclick = () => addFeature('mulch', -yard.w * .2, -yard.d * .25, Math.min(14, yard.w * .4), 6);
@@ -127,7 +127,7 @@ function refreshList() {
   const area = k => items.filter(o => o.kind === k).reduce((s, o) => s + o.w * o.d, 0), A = { mulch: area('mulch'), path: area('path'), gravel: area('gravel'), dg: area('dg') };
   $('#y3count').textContent = plants.length;
   $('#plList').innerHTML = (Object.keys(counts).length ? Object.entries(counts).map(([id, n]) => { const p = PLANTS.find(x => x.id === id);
-    return `<li><img src="img/plants/${id}.jpg" alt="" onerror="this.style.visibility='hidden'"><span><b>${p?.name || id}</b><small>${PLANT3D[id]?.h} ft tall × ${PLANT3D[id]?.w} ft wide · ${p?.type || ''}</small></span><em>×${n}</em></li>`; }).join('') : '<li class="small">No plants yet. Pick one below and tap the plan.</li>')
+    return `<li><img src="img/plants/${id}.jpg" alt="" onerror="this.style.visibility='hidden'"><span><b>${p?.name || id}</b><small>${PLANT_SIZE[id]?.h} ft tall × ${PLANT_SIZE[id]?.w} ft wide · ${p?.type || ''}</small></span><em>×${n}</em></li>`; }).join('') : '<li class="small">No plants yet. Pick one below and tap the plan.</li>')
     + Object.entries(A).filter(([, v]) => v).map(([k, v]) => `<li class="ft"><i style="background:${FEAT[k].fill}"></i><span><b>${FEAT[k].name}</b><small>${v.toFixed(0)} sq ft</small></span></li>`).join('')
     + items.filter(o => o.kind === 'wall').map(o => `<li class="ft"><i style="background:${FEAT.wall.fill}"></i><span><b>Retaining wall</b><small>${o.w.toFixed(0)} ft long × ${o.h} ft high + ${o.footing} ft footing${o.surcharge ? ' · load: ' + o.surcharge : ''}</small></span></li>`).join('')
     + (grade.cutCuYd || grade.fillCuYd ? `<li class="ft"><i style="background:#8a6a4a"></i><span><b>Grading</b><small>${grade.cutCuYd} cu yd cut · ${grade.fillCuYd} cu yd fill</small></span></li>` : '');
@@ -143,7 +143,7 @@ function apply(data) {
   meta = {}; for (const k of ['style', 'containerSizes', 'budgetOpts']) if (data[k] != null) meta[k] = data[k];
   Object.assign(yard, data.yard || {}); house = data.house && !data.house.isDefault ? { x: data.house.x, z: data.house.z, side: data.house.side } : null;
   const g = (data.items || []).find(it => it.kind === 'grade'); grade = g ? { cutCuYd: +g.cutCuYd || 0, fillCuYd: +g.fillCuYd || 0 } : { cutCuYd: 0, fillCuYd: 0 };
-  items = (data.items || []).filter(it => it.kind !== 'grade' && (it.kind !== 'plant' || PLANT3D[it.id])).map(it => ({ uid: uid(), ...it, w: it.w ?? 1, d: it.d ?? 1, ...(it.kind === 'wall' ? { h: +it.h || 2.5, footing: +it.footing || 0, surcharge: it.surcharge || false } : {}) }));
+  items = (data.items || []).filter(it => it.kind !== 'grade' && (it.kind !== 'plant' || PLANT_SIZE[it.id])).map(it => ({ uid: uid(), ...it, w: it.w ?? 1, d: it.d ?? 1, ...(it.kind === 'wall' ? { h: +it.h || 2.5, footing: +it.footing || 0, surcharge: it.surcharge || false } : {}) }));
   $('#plW').value = yard.w; $('#plD').value = yard.d; $('#plCut').value = grade.cutCuYd || ''; $('#plFill').value = grade.fillCuYd || ''; selected = null; draw();
 }
 $('#plSave').onclick = () => { localStorage.setItem(KEY, JSON.stringify(serialize())); hint(`Saved ${items.length} items on this device.`); };

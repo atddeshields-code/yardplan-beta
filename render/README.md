@@ -11,8 +11,6 @@ AI concept render of the user's yard photo with the current design. It is the **
 | `render.js` | `createRenderer`, `attachToOverlay`, guide image, projection, cache |
 | `demo.html` | Standalone demo (mock by default; `?api=https://…` for a real Worker) |
 | `worker/` | Cloudflare Worker `POST /api/render` + adapters + `wrangler.toml.sample` |
-| `walkaround/` | Phase 2A: walk-around + 360° panorama prototype (mock) |
-| `splats.md` | Phase 2B: Gaussian-splat research |
 | `assets/` | `yard-before.jpg`, `sample-render.jpg` (mock result), demo screenshots |
 | `test/` | `npm test` (node --test, offline) |
 
@@ -69,5 +67,7 @@ Photoreal render (Yardplan): /workspace/yardplan-render
 3. `wrangler secret put XAI_API_KEY` (and `FAL_KEY`), then `wrangler deploy`.
 4. Spot-check that the output has the same aspect ratio as the input, especially portrait phone photos. Check that the xAI request fields `aspect_ratio`/`resolution`/`quality`/`images` match the live API; they are marked [UNVERIFIED] in `adapters.js`.
 
-## Walk-around / 360 (phase 2A)
-`walkaround/walkaround.js`: `pickFrames`, `validateSet` (6–12 photos), `extractVideoFrames(video, n)` (browser video+canvas), `renderSequence(renderer, frames, design, {seed, equirect})` (shared seed, and render #1 is sent as `reference` to later frames; reference images work on xAI (≤5), OpenAI, Gemini, and Kontext multi variants, but **not** single-image Kontext pro, where the Worker drops them), `viewState` (crossfade), `createWalkViewer`, `createPanoViewer` (three.js sphere), `blendSeam`/`seamDelta` for the equirect wrap. Server-side frame extraction: `ffmpeg -i walk.mp4 -vf "fps=2,scale='min(1600,iw)':-2" -q:v 3 frames/%03d.jpg` then pick 6–12 with `pickFrames`. Panoramas: input must be 2:1. The prompt asks for equirectangular output, and the client blends the seam band afterwards. Providers that can't output 2:1 need the pano split into overlapping tiles (not built).
+
+
+
+v15: the walk-around/panorama prototype and the splat research were removed from the app (3D is out of scope); archived in /workspace/yardplan-archive-3d/v15-removed/.

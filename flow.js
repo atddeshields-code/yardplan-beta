@@ -1,17 +1,28 @@
-// Homeowner Design flow (v10, per yardplan-research/design-system.md + homeowner-microcopy.md):
-// Landing → 1 Photo (consent + ZIP) → 2 Style → 3 Preview (render when a backend exists) → 4 Tweak → 5 Plan.
-// One primary button per screen (sticky bottom bar). Classic globals: state, PLANTS, PLANT3D, STYLES, esc, go, fits.
+// Homeowner flow (v15, per yardplan-research/simplify-v15.md): 3 steps, one primary action per screen.
+// 1 Your yard (photo + ZIP) → 2 Pick a look (style + budget) → 3 Your new yard (render, price, rows → sheets).
+// Pro tools (site plan, photo calibration, materials, measurements, water pressure, MWELO) live in contractor mode only.
+// Classic globals: state, PLANTS, PLANT_SIZE, STYLES, esc, go, fits.
 const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
 const HAS_RENDER = !!window.YARDPLAN_RENDER_URL;
-const F = { step: 0, photo: false, sample: false, style: '', plants: [], ground: '', plan: null, mode: localStorage.getItem('yardplan.mode.who') || 'diy', saved: false,
-  budget: +localStorage.getItem('yardplan.budget') || 10000, tier: null, edits: null, utility: localStorage.getItem('yardplan.utility') || '', turfSf: +localStorage.getItem('yardplan.turfSf') || 0 };
+const SAMPLE_RENDER = 'render/assets/sample-real-render.jpg';
+const F = { step: 1, photo: false, sample: false, style: '', stylePicked: false, plants: [], ground: '', plan: null, mode: localStorage.getItem('yardplan.mode.who') || 'diy', saved: false, savedId: null,
+  budget: +localStorage.getItem('yardplan.budget') || 10000, tier: null, manual: null, edits: null, utility: localStorage.getItem('yardplan.utility') || '', turfSf: +localStorage.getItem('yardplan.turfSf') || 0,
+  render: null, reopened: null };
 const flow = $('#flow'), next = $('#fNext'), back = $('#fBack');
 const money = n => '$' + Math.round(+n || 0).toLocaleString('en-US');
-const moneyK = n => n >= 1000 ? '$' + (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : money(n);
-const styleName = () => (STYLES.find(s => s.id === F.style)?.name || '').split(' /')[0];
-const SHORT = { modern: 'Clean lines, grasses, gravel', cottage: 'Soft, colorful, full of flowers', xeriscape: 'Low water, big texture', woodland: 'Shady, layered, natural', japanese: 'Calm, mossy, stone and maple', prairie: 'Native grasses and wildflowers', mediterranean: 'Silvery, fragrant, sun-loving', formal: 'Clipped hedges and symmetry', tropical: 'Big leaves, bold color' };
+const moneyK = n => n >= 1000 ? '$' + (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : money(n);
+const NAME = { mediterranean: 'Mediterranean', xeriscape: 'Low-water', modern: 'Modern', cottage: 'Cottage', prairie: 'Native meadow', japanese: 'Japanese', woodland: 'Woodland', formal: 'Formal', tropical: 'Tropical' };
+const MAIN6 = ['mediterranean', 'xeriscape', 'modern', 'cottage', 'prairie', 'japanese'], MORE3 = ['woodland', 'formal', 'tropical'];
+const styleName = id => NAME[id || F.style] || (STYLES.find(s => s.id === (id || F.style))?.name || '').split(' /')[0];
+const SHORT = { modern: 'Clean lines, grasses, gravel', cottage: 'Soft, colorful, full of flowers', xeriscape: 'Big texture, little water', woodland: 'Shady, layered, natural', japanese: 'Calm, mossy, stone and maple', prairie: 'Native grasses and wildflowers', mediterranean: 'Silvery, fragrant, sun-loving', formal: 'Clipped hedges and symmetry', tropical: 'Big leaves, bold color' };
+const place = () => state.place ? `${state.place.city}, ${state.place.st}` : '';
+const near = () => state.place ? `near ${state.place.city}` : 'where you live';
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, 4000); }
-// ---------- before/after slider (§3.5) ----------
+// ---------- ZIP → state (offline, Census ZIP3 majority state) ----------
+let Z3 = null; import('./marketplace/data/zip3-state.js').then(m => { Z3 = m.zip3ToState; if (F.step === 2) renderStyles(); }).catch(e => console.warn(e));
+const usState = () => state.place?.st || (state.zip && Z3 ? Z3[state.zip.slice(0, 3)] : '') || '';
+function defaultStyleFor(st) { return ['CA', 'NV', 'AZ'].includes(st) ? 'mediterranean' : ['TX', 'CO', 'NM', 'UT'].includes(st) ? 'xeriscape' : 'cottage'; }
+// ---------- before/after slider ----------
 function slider(fig) {
   const h = fig.querySelector('.ba__handle'); let pos = 50;
   const set = v => { pos = Math.max(0, Math.min(100, v)); fig.style.setProperty('--pos', pos + '%'); h.setAttribute('aria-valuenow', Math.round(pos)); h.setAttribute('aria-valuetext', `${Math.round(100 - pos)}% after`); };
@@ -22,95 +33,102 @@ function slider(fig) {
   set(50); return set;
 }
 slider($('#lBA'));
-// ---------- step machine ----------
+// ---------- step machine (3 steps) ----------
+const prog = $('#prog');
 function step(n) {
-  F.step = n = Math.max(0, Math.min(5, n)); flow.dataset.step = n; document.body.dataset.step = n;
+  n = Math.max(1, Math.min(3, +n || 1)); const from = F.step; F.step = n; flow.dataset.step = n; document.body.dataset.step = n;
+  if (from === 1 && n > 1) localStorage.setItem('yardplan.seen', '1');
+  if (n !== 3) cancelRender();
   $$('#flow .step').forEach(s => s.hidden = +s.dataset.step !== n);
-  $('.steps').hidden = n === 0;
-  $$('.steps li').forEach(li => { const s = +li.dataset.s; li.classList.toggle('is-done', s < n); li.classList.toggle('is-current', s === n); li.toggleAttribute('aria-current', s === n); li.tabIndex = s < n ? 0 : -1; });
-  $('#stepSr').textContent = n ? `Step ${n} of 5` : '';
-  back.hidden = n === 0;
-  if (n === 2) renderStyles(); if (n === 3) renderPreview(); if (n === 4) renderTweak(); if (n === 5) renderPlan();
-  update(); const h = $(`#flow .step[data-step="${n}"] h1`); if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); } window.scrollTo({ top: 0 });
+  prog.setAttribute('aria-valuenow', n); prog.setAttribute('aria-label', `Step ${n} of 3`);
+  $$('#prog li').forEach(li => { const s = +li.dataset.s; li.classList.toggle('is-done', s < n); li.classList.toggle('is-current', s === n); });
+  $('#stepSr').textContent = `Step ${n} of 3`;
+  back.hidden = n === 1; $('#hero1').hidden = n !== 1 || !!localStorage.getItem('yardplan.seen');
+  if (n === 2) renderStyles(); if (n === 3) renderResult();
+  update(); const h = $(`#flow .step[data-step="${n}"] h1:not(.display)`) || $(`#flow .step[data-step="${n}"] h1`); if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); } window.scrollTo({ top: 0 });
 }
+const hasPhoto = () => F.photo || !!window.overlayApi?.hasPhoto?.();
 function update() {
-  const n = F.step; let label = 'Continue', ok = true;
-  if (n === 0) label = 'Start with a photo';
-  if (n === 1) { ok = (F.photo || !!window.overlayApi?.hasPhoto?.()) && !!state.zone; label = !F.photo && !window.overlayApi?.hasPhoto?.() ? 'Add a photo to continue' : !state.zone ? 'Enter your ZIP to continue' : 'Continue'; }
-  if (n === 2) { ok = !!F.style; label = F.style ? `See my yard in ${styleName()}` : 'Tap a style to continue'; }
-  if (n === 3) label = 'Tweak plants and materials';
-  if (n === 4) label = HAS_RENDER ? 'Update render' : 'See my plan';
-  if (n === 5) label = F.saved ? 'Open care guide' : 'Save';
-  next.disabled = !ok; next.setAttribute('aria-disabled', String(!ok)); next.textContent = label;
+  const n = F.step; let label = 'Continue', ok = true, help = '', note = '';
+  if (n === 1) { ok = hasPhoto() && !!state.zone; help = !hasPhoto() ? 'Add a photo to continue' : !state.zone ? (state.zip && !$('#zoneManual').hidden ? 'Pick your zone to continue' : 'Add your ZIP to continue') : '';
+    note = 'By tapping Continue, you confirm you took this photo or have permission to use it.'; }
+  if (n === 2) { ok = !!F.style; label = 'See my yard'; note = 'About 30 seconds'; }
+  if (n === 3) { const R = F.render; label = R?.state === 'failed' ? 'Try again' : F.saved ? 'Share' : 'Save my plan'; }
+  next.setAttribute('aria-disabled', String(!ok)); next.classList.toggle('is-disabled', !ok); next.textContent = label;
+  $('#fHelp').textContent = help; $('#fHelp').hidden = !help; $('#fNote').textContent = note; $('#fNote').hidden = !note;
+  const pr = $('#fPrice'); pr.hidden = n !== 3 || !F.plan; if (n === 3 && F.plan) pr.innerHTML = `<small>About</small>${money(F.plan.total)}`;
 }
-$('.steps').addEventListener('click', e => { const li = e.target.closest('li.is-done'); if (li) step(+li.dataset.s); });
-$('.steps').addEventListener('keydown', e => { const li = e.target.closest('li.is-done'); if (li && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); step(+li.dataset.s); } });
 next.onclick = async () => {
+  if (next.getAttribute('aria-disabled') === 'true') { if (F.step === 1) (hasPhoto() ? $('#zip') : $('#fDrop')).focus(); return; }
   const n = F.step;
-  if (n === 2) { F.edits = null; F.tier = null; try { const base = designFor(F.style, F.plants.length ? F.plants : pickPlants(F.style), F.ground || defaultGround(F.style)); if (totalFor(await priceDesign(base)) > F.budget) F.tier = 'better'; } catch (e) { console.warn(e); } F.placed = false; }
-  if (n === 4) { F.manual = null; buildDesign(); if (HAS_RENDER) { step(3); return; } }
-  if (n === 5) { if (F.saved) go('care'); else { savePlan(); update(); } return; }
+  if (n === 1) { F.consentAt = new Date().toISOString(); localStorage.setItem('yardplan.photoConsent', F.consentAt); }
+  if (n === 2) { F.edits = null; F.tier = null; F.manual = null; F.plants = []; F.ground = ''; F.reopened = null; F.saved = false; F.savedId = null; F.placed = false; }
+  if (n === 3) { if (F.render?.state === 'failed') return startRender(true); if (F.saved) return share(); return savePlan(); }
   step(n + 1);
 };
 back.onclick = () => step(F.step - 1);
 window.addEventListener('yardplan:zone', () => { update(); if (F.step === 2) renderStyles(); });
-// ---------- 1 Photo ----------
-$('#fOwn').onchange = e => { const on = e.target.checked; $('#fPhoto').disabled = !on; $('#fDrop').setAttribute('aria-disabled', String(!on)); $('#fDropTxt').textContent = on ? 'JPG, PNG or HEIC' : 'Tick the box below first'; };
-$('#fDrop').addEventListener('click', e => { if (!$('#fOwn').checked) { e.preventDefault(); const c = $('.chk.own'); c.classList.add('nudge'); $('#fOwn').focus(); setTimeout(() => c.classList.remove('nudge'), 600); } });
+// ---------- 1 Your yard ----------
 $('#fPhoto').onchange = async e => {
-  const f = e.target.files[0]; if (!f || !$('#fOwn').checked) return;
+  const f = e.target.files[0]; if (!f) return;
   if (!/^image\//.test(f.type) && !/\.(heic|heif|jpe?g|png|webp)$/i.test(f.name)) { $('#fDropTxt').textContent = "That file isn't a photo. Try a JPG, PNG or HEIC."; return; }
   $('#fDropTxt').textContent = 'Getting your photo ready…';
-  try { const b = await window.overlayApi.loadFile(f); setPhoto(URL.createObjectURL(b)); F.sample = false; }
+  try { const b = await window.overlayApi.loadFile(f); setPhoto(URL.createObjectURL(b)); F.sample = false; F.placed = false; }
   catch (err) { $('#fDropTxt').textContent = "We couldn't open that photo. Try another one."; }
   update();
 };
-function setPhoto(url) { F.photo = true; const d = $('#fDrop'); d.style.backgroundImage = `url("${url}")`; d.classList.add('has'); $('#fDropTxt').textContent = 'Tap to change photo'; }
+function setPhoto(url) { F.photo = true; const d = $('#fDrop'); d.style.backgroundImage = `url("${url}")`; d.classList.add('has'); $('#fDropTxt').textContent = 'Change photo'; d.querySelector('b').textContent = 'Photo added'; }
+// ZIP: auto-lookup at 5 digits (debounced), no button. app.js #zipForm does the lookup and shows "City, ST · Zone".
+let zipT; $('#zip').addEventListener('input', () => { const v = $('#zip').value.replace(/\D/g, '').slice(0, 5); if (v !== $('#zip').value) $('#zip').value = v; clearTimeout(zipT); if (v.length === 5) zipT = setTimeout(() => { if (v !== state.zip || !state.zone) $('#zipForm').requestSubmit(); }, 250); });
+$('#fAddrOpen').onclick = () => { const b = $('#fAddrBox'), on = b.hidden; b.hidden = !on; $('#fAddrOpen').setAttribute('aria-expanded', String(on)); if (on) $('#fAddr').focus(); };
+$('#fAddrGo').textContent = 'Find';
 $('#fAddrGo').onclick = async () => {
-  const q = $('#fAddr').value.trim(); if (q.length < 5) return; const m = $('#fAddrMsg'); m.textContent = 'Finding your address…';
+  const q = $('#fAddr').value.trim(); if (q.length < 5) return; const m = $('#fAddrMsg'); m.textContent = 'Finding your yard from above… up to a minute';
   try { const g = await window.overlayApi.geocode(q); const zip = (/(\d{5})(?:-\d{4})?\s*$/.exec(g.label || '') || [])[1];
     if (zip && zip !== state.zip) { $('#zip').value = zip; $('#zipForm').requestSubmit(); }
-    m.textContent = 'Loading the aerial view… this can take up to a minute.';
-    await window.overlayApi.loadNaip(q); setPhoto(window.overlayApi.imageUrl()); m.textContent = `Aerial loaded for ${g.label}. Imagery: USDA NAIP (public domain).`; update();
-  } catch (err) { m.textContent = err.message; }
+    await window.overlayApi.loadNaip(q); setPhoto(window.overlayApi.imageUrl()); F.sample = false; F.placed = false; m.textContent = `Using an aerial view of ${g.label.split(',')[0]}.`; update();
+  } catch (err) { m.textContent = "We couldn't find that address. Try adding the city and state."; }
 };
-// sample yard
 $('#lSample').onclick = async () => {
   const b = await (await fetch('render/assets/yard-before.jpg')).blob(); await window.overlayApi.loadFile(new File([b], 'sample-yard.jpg', { type: 'image/jpeg' }));
-  F.sample = true; F.photo = true; setPhoto('render/assets/yard-before.jpg'); $('#fOwn').checked = true; $('#fOwn').onchange({ target: $('#fOwn') });
-  if (!state.zone) { $('#zip').value = '95814'; $('#zipForm').requestSubmit(); }
-  F.style = 'xeriscape'; await new Promise(r => { const t = setInterval(() => { if (state.zone) { clearInterval(t); r(); } }, 100); setTimeout(() => { clearInterval(t); r(); }, 5000); });
-  buildDesign(true); step(3);
+  F.sample = true; F.placed = false; setPhoto('render/assets/yard-before.jpg');
+  if (!state.zone || state.zip !== '95814') { $('#zip').value = '95814'; $('#zipForm').requestSubmit(); }
+  await new Promise(r => { const t = setInterval(() => { if (state.zone) { clearInterval(t); r(); } }, 100); setTimeout(() => { clearInterval(t); r(); }, 5000); });
+  F.style = 'xeriscape'; F.stylePicked = true; localStorage.setItem('yardplan.style', F.style); F.plants = []; F.ground = ''; F.tier = null; F.manual = null; F.saved = false; F.savedId = null; F.reopened = null;
+  step(3);
 };
-// ---------- 2 Style ----------
+// ---------- 2 Pick a look ----------
+let moreOpen = false;
 function renderStyles() {
-  $('#fStyles').innerHTML = STYLES.map(s => { const n = PLANTS.filter(p => p.styles.includes(s.id) && fits(p)).length;
-    return `<button class="card card--interactive fsc${F.style === s.id ? ' card--selected' : ''}" role="radio" aria-checked="${F.style === s.id}" data-id="${s.id}" ${n < 3 ? 'disabled' : ''}><img class="card__media" src="img/styles/${s.id}-800.webp" srcset="img/styles/${s.id}-800.webp 800w, img/styles/${s.id}-1600.webp 1600w" sizes="(min-width: 900px) 400px, 100vw" alt="" loading="lazy"><span class="card__body"><b class="card__title">${esc(s.name.split(' /')[0])}</b><span class="fsc__cost footnote" aria-live="polite">${n < 3 ? '' : 'Pricing…'}</span><span class="footnote">${n < 3 ? 'Few plants for your zone' : esc(SHORT[s.id] || '')}</span></span><i class="tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></i></button>`; }).join('');
-  $('#fStyleHelp').textContent = state.zone ? `Plants are chosen to do well in Zone ${state.zoneLabel}.` : '';
-  setBudget(F.budget); setWho(F.mode);
+  const avail = id => PLANTS.filter(p => p.styles.includes(id) && fits(p)).length >= 3;
+  if (!F.stylePicked || !avail(F.style)) { let d = defaultStyleFor(usState()); if (!avail(d)) d = [...MAIN6, ...MORE3].find(avail) || ''; F.style = d; if (d) localStorage.setItem('yardplan.style', d); }
+  if (MORE3.includes(F.style)) moreOpen = true;
+  const ids = moreOpen ? [...MAIN6, ...MORE3] : MAIN6;
+  $('#fStyles').innerHTML = ids.map(id => { const ok = avail(id), on = F.style === id;
+    return `<button class="card card--interactive fsc${on ? ' card--selected' : ''}" type="button" role="radio" aria-checked="${on}" data-id="${id}" ${ok ? '' : 'disabled'}><img class="card__media" src="img/styles/${id}-800.webp" srcset="img/styles/${id}-800.webp 800w, img/styles/${id}-1600.webp 1600w" sizes="(min-width: 900px) 300px, 50vw" alt="" loading="lazy" width="800" height="600"><span class="card__body"><b class="card__title">${esc(styleName(id))}</b><span class="footnote">${ok ? esc(SHORT[id] || '') : 'Few plants grow here'}</span><span class="fsc__cost footnote" aria-live="polite">${ok ? '<span class="skeleton skeleton--text" style="width:6ch;display:inline-block"></span>' : ''}</span></span><i class="tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></i></button>`; }).join('');
+  $('#fMore').hidden = moreOpen; $('#fMore').setAttribute('aria-expanded', String(moreOpen));
+  $('#fStyleLead').textContent = `You can change it later. Plants are picked to grow well ${near()}.`;
+  setBudget(F.budget); setWho(F.mode); update();
 }
+$('#fMore').onclick = () => { moreOpen = true; renderStyles(); $('#fStyles [data-id="woodland"]')?.focus(); };
 $('#fStyles').onclick = e => { const b = e.target.closest('[data-id]'); if (!b || b.disabled) return; if (F.style !== b.dataset.id) { F.style = b.dataset.id; F.plants = []; F.ground = ''; }
-  localStorage.setItem('yardplan.style', F.style); $$('#fStyles .fsc').forEach(x => { const on = x === b; x.classList.toggle('card--selected', on); x.setAttribute('aria-checked', on); }); update(); };
-// ---------- budget (Style step) ----------
+  F.stylePicked = true; localStorage.setItem('yardplan.style', F.style); $$('#fStyles .fsc').forEach(x => { const on = x === b; x.classList.toggle('card--selected', on); x.setAttribute('aria-checked', on); }); update(); };
+// ---------- budget ----------
 const BMIN = 1000, BMAX = 50000, toT = b => Math.round(100 * Math.log(b / BMIN) / Math.log(BMAX / BMIN)), fromT = t => { const v = BMIN * Math.pow(BMAX / BMIN, t / 100); return v < 10000 ? Math.round(v / 250) * 250 : Math.round(v / 1000) * 1000; };
-const fmtB = b => Math.round(b).toLocaleString();
-function setBudget(b, from) {
+function setBudget(b) {
   F.budget = Math.max(500, Math.min(250000, Math.round(+b || 0))); localStorage.setItem('yardplan.budget', F.budget);
-  if (from !== 'input') $('#bInput').value = fmtB(F.budget); if (from !== 'range') $('#bRange').value = toT(Math.min(BMAX, Math.max(BMIN, F.budget)));
-  $('#bRange').style.setProperty('--p', toT(Math.min(BMAX, Math.max(BMIN, F.budget))) + '%');
-  $$('#bPresets [data-b]').forEach(c => c.setAttribute('aria-pressed', +c.dataset.b === F.budget)); F.fitDone = false; scheduleStyleCosts();
+  $$('#bPresets [data-b]').forEach(c => c.setAttribute('aria-checked', String(+c.dataset.b === F.budget)));
+  const r = $('#adjRange'); if (r) { r.value = toT(Math.min(BMAX, Math.max(BMIN, F.budget))); r.style.setProperty('--p', r.value + '%'); $('#adjBudgetVal').textContent = money(F.budget) + (F.budget >= BMAX ? '+' : ''); }
+  scheduleStyleCosts();
 }
-function setWho(m) { F.mode = m; localStorage.setItem('yardplan.mode.who', m); $$('#bMode [data-m]').forEach(b => b.setAttribute('aria-checked', b.dataset.m === m)); F.fitDone = false; scheduleStyleCosts(); }
-$('#bRange').oninput = e => setBudget(fromT(+e.target.value), 'range');
-$('#bInput').oninput = e => { const v = +e.target.value.replace(/[^\d]/g, ''); if (v) setBudget(v, 'input'); };
-$('#bInput').onblur = () => $('#bInput').value = fmtB(F.budget);
+function setWho(m) { F.mode = m; localStorage.setItem('yardplan.mode.who', m); $('#bWho').firstChild.textContent = m === 'diy' ? 'Doing it yourself · ' : 'Hiring a pro · ';
+  $$('#adjWho [data-m]').forEach(b => b.setAttribute('aria-checked', String(b.dataset.m === m))); scheduleStyleCosts(); }
+$('#bWho').innerHTML = 'Doing it yourself · <button type="button" class="linkbtn" id="bWhoBtn">Change</button>';
+$('#bWhoBtn').onclick = () => setWho(F.mode === 'diy' ? 'pro' : 'diy');
 $('#bPresets').onclick = e => { const c = e.target.closest('[data-b]'); if (c) setBudget(+c.dataset.b); };
-$('#bMode').onclick = e => { const b = e.target.closest('[data-m]'); if (b) setWho(b.dataset.m); };
-// ---------- pricing: ONE path shared with Pro mode (contractor/budget-fit.js) ----------
-// homeownerEstimate().pro.total === proBid().rounded.total for the same design, so "hire a pro" here matches the Pro bid.
 let BF = null, REB = null; const loadCostMods = () => Promise.all([import('./contractor/budget-fit.js'), import('./contractor/data/rebates.js')]).then(([m, r]) => (BF = m, REB = r.REBATE_RULES, m));
 loadCostMods().catch(e => console.warn(e));
-const CATALOG = () => ({ plants: PLANTS, plant3d: PLANT3D });
+const CATALOG = () => ({ plants: PLANTS, plant3d: PLANT_SIZE });
 const bookOrThrow = () => { const b = window.proApi?.book?.(); if (!b) throw new Error('no price book'); return b; };
 // Lawn being taken out: what the user typed, else the new beds and hardscape area (assumes they replace grass).
 const turfEstimate = d => Math.round((d?.items || []).filter(i => !['plant', 'lawn', 'grade', 'wall'].includes(i.kind)).reduce((a, i) => a + (+i.w || 0) * (+i.d || 0), 0));
@@ -131,12 +149,10 @@ const editsOf = fit => Object.fromEntries(fit.selections.filter(x => x.lever !==
 const applyEdits = (base, edits) => !edits ? base : { ...base, items: base.items.map((it, i) => i in edits ? edits[i] : it).filter(Boolean) };
 let costT; function scheduleStyleCosts() { clearTimeout(costT); costT = setTimeout(styleCosts, 150); }
 async function styleCosts() {
-  if (F.step !== 2 || !window.proApi?.book?.()) return; const m = BF || await loadCostMods();
-  for (const s of STYLES) { const card = $(`#fStyles .fsc[data-id="${s.id}"]`); if (!card || card.disabled) continue;
-    try { const base = designFor(s.id, pickPlants(s.id), defaultGround(s.id)); let tot = totalFor(await priceDesign(base)), ok = tot <= F.budget, txt;
-      if (ok) txt = `About ${moneyK(tot)} · fits`;
-      else { const f = m.fitBudget(fitReq(base)); if (f.belowMinimum) txt = `From ${moneyK(f.minViable)} · over budget`; else { tot = totalFor(await priceDesign(applyEdits(base, editsOf(f)))); ok = tot <= F.budget; txt = ok ? `About ${moneyK(tot)} · fits with trims` : `From ${moneyK(tot)} · over budget`; } }
-      const tag = card.querySelector('.fsc__cost'); tag.textContent = txt; tag.classList.toggle('is-over', !ok); card.dataset.fit = ok ? '1' : '0'; } catch (e) { console.warn(e); } }
+  if (F.step !== 2 || !window.proApi?.book?.()) { if (F.step === 2) costT = setTimeout(styleCosts, 400); return; }
+  for (const card of $$('#fStyles .fsc:not([disabled])')) { const id = card.dataset.id;
+    try { const base = designFor(id, pickPlants(id), defaultGround(id)), tot = totalFor(await priceDesign(base)), ok = tot <= F.budget;
+      const tag = card.querySelector('.fsc__cost'); if (!tag) continue; tag.textContent = ok ? `About ${moneyK(tot)}` : 'Over budget'; tag.classList.toggle('is-over', !ok); card.dataset.fit = ok ? '1' : '0'; } catch (e) { console.warn(e); } }
 }
 // ---------- design model ----------
 function pickPlants(styleId) {
@@ -161,131 +177,198 @@ function buildDesign(force) {
   if (!F.plants.length || force) F.plants = pickPlants(F.style); if (!F.ground) F.ground = defaultGround(F.style);
   F.base = designFor(F.style, F.plants, F.ground); F.edits = F.manual || null;
   if (!F.manual && F.tier && BF) { try { const r = F.tier === 'better' ? BF.fitBudget(fitReq(F.base)) : BF.fitTiers(fitReq(F.base))[F.tier]; F.edits = editsOf(r); } catch (e) { console.warn(e); } }
-  F.design = applyEdits(F.base, F.edits); localStorage.setItem('yardplan.design3d.v2', JSON.stringify(F.design));
+  F.design = applyEdits(F.base, F.edits); try { localStorage.setItem('yardplan.design.v3', JSON.stringify(F.design)); } catch (e) {};
   if (window.planApi?.ready?.()) window.planApi.apply(F.design); window.dispatchEvent(new Event('yardplan:design'));
-  F.placed = false; F.plan = null; F.saved = false;
+  F.placed = false; F.plan = null; F.P = null; F.saved = false;
 }
 async function placeOnPhoto() {
   const o = window.overlayApi; if (!o?.hasPhoto?.() || F.placed) return; const ids = []; F.plants.forEach(id => { ids.push(id); if (PLANTS.find(p => p.id === id)?.type !== 'tree') ids.push(id); });
   await o.autoPlace(ids.slice(0, 10)); F.placed = true;
 }
-// ---------- 3 Preview ----------
-async function renderPreview() {
-  if (!F.design) buildDesign();
-  const el = $('#fPreview'); const photoUrl = window.overlayApi?.imageUrl?.() || '';
-  el.innerHTML = `<h1>${HAS_RENDER ? `Here's your yard in ${esc(styleName())}` : `Your yard in ${esc(styleName())}`}</h1><p class="lead">${HAS_RENDER ? 'Drag the slider to compare.' : 'Each circle is a plant at its full-grown width.'}</p>
-   <div class="stage" id="pStage">${HAS_RENDER ? `<div class="render-wait" id="pWait" role="status" aria-live="polite"><img src="${photoUrl}" alt="" class="render-wait__photo"><div class="render-wait__sweep" aria-hidden="true"></div><div class="render-wait__panel"><p class="render-wait__msg" id="pMsg">Reading your yard…</p><div class="bar"><i id="pBar" style="--p:8%"></i></div></div></div>` : ''}
-    <figure class="ba photo" id="pBA" style="--pos:${HAS_RENDER ? 50 : 100}%" ${HAS_RENDER ? 'hidden' : ''}><img class="ba__before" id="pBefore" src="${photoUrl}" alt="Your yard today"><div class="ba__after"><img id="pAfter" alt="AI concept of your yard"></div>
-     <canvas class="measure" id="pMeasure" aria-hidden="true" hidden></canvas>${HAS_RENDER ? '<span class="ba__tag ba__tag--l">Before</span><span class="ba__tag ba__tag--r">After</span><span class="ai-label">AI concept · not to scale</span><div class="ba__handle" role="slider" tabindex="0" aria-label="Before and after comparison" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div>' : ''}
-     ${F.sample ? '<span class="sample-banner">Sample yard: this isn\'t your home.</span>' : ''}</figure></div>
-   <div class="stage-ctl">${HAS_RENDER ? '<div class="seg2" role="radiogroup" aria-label="View"><button role="radio" aria-checked="false" data-v="before">Before</button><button role="radio" aria-checked="true" data-v="after">After</button></div>' : ''}
-    <label class="switch"><input type="checkbox" id="pMeas" ${HAS_RENDER ? '' : 'checked'}><span>Show measurements</span></label><button class="btn btn--ghost btn--sm" type="button" id="pAdjust">Adjust</button></div>`;
-  $('#pAdjust').onclick = () => openSheet('#adjustSheet');
-  await placeOnPhoto(); if (!HAS_RENDER) $('#pBefore').src = window.overlayApi.imageUrl();
-  const meas = () => drawMeasure($('#pMeas').checked); $('#pMeas').onchange = meas; $('#pBefore').onload = meas; meas();
-  if (!HAS_RENDER) return;
-  const setPos = slider($('#pBA')); $$('.seg2 button').forEach(b => b.onclick = () => { $$('.seg2 button').forEach(x => x.setAttribute('aria-checked', x === b)); setPos(b.dataset.v === 'before' ? 100 : 0); });
-  const msgs = ['Reading your yard…', 'Finding the ground and the edges…', `Choosing plants for Zone ${state.zoneLabel || ''}…`, 'Planting and mulching…', 'Adding the finishing touches…', 'Almost there…'];
-  let i = 0, t0 = Date.now(); window.renderHook?.refresh?.(true);
-  const iv = setInterval(() => { if (F.step !== 3) return clearInterval(iv); const h = window.renderHook, res = h?.lastResult, s = h?.status || {};
-    if (res && !res.mock && s.state === 'done') { clearInterval(iv); $('#pBar').style.setProperty('--p', '100%'); $('#pAfter').src = res.dataURL || res.imageUrl; $('#pWait').hidden = true; $('#pBA').hidden = false; drawMeasure($('#pMeas').checked); return; }
-    if (s.state === 'failed' || s.state === 'unavailable') { clearInterval(iv); $('#pWait').hidden = true; $('#pBA').hidden = false; $('#pBA').style.setProperty('--pos', '100%'); toast("We couldn't make your render this time. Your design is safe. Try again in a minute."); return; }
-    const el = (Date.now() - t0) / 1000; if (++i % 8 === 0) $('#pMsg').textContent = el > 40 ? 'Taking a little longer than usual. Hang tight.' : msgs[Math.min(msgs.length - 1, Math.floor(i / 8))];
-    $('#pBar').style.setProperty('--p', Math.min(90, 8 + el * 2) + '%'); }, 500);
+// ---------- 3 Your new yard ----------
+const GROUNDS = [['lawn', 'Lawn'], ['gravel', 'Gravel'], ['dg', 'Crushed rock path'], ['mulch', 'Mulch']];
+const groundName = k => GROUNDS.find(g => g[0] === k)?.[1] || k;
+const sunOf = p => p.sun.includes('full') ? 'Sun' : p.sun.includes('part') ? 'Part shade' : 'Shade';
+const waterOf = p => p.water === 'low' ? 'Low water' : p.water === 'med' ? 'Some water' : 'Regular water';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function renderResult() {
+  const re = F.reopened, wasSaved = F.saved, id = F.savedId;
+  if (!BF) await loadCostMods().catch(e => console.warn(e));
+  buildDesign(); F.savedId = id; if (re && wasSaved) F.saved = true;
+  $('#fResult').innerHTML = `<div class="res"><div class="res__media" id="rMedia"></div><div class="res__body">
+   <h1 id="rH">Your yard, ${esc(styleName())}</h1>
+   <p class="price-line" id="rPrice" aria-live="polite"><span class="skeleton skeleton--text" style="width:16ch;display:inline-block"></span></p>
+   <p class="reb-line" id="rReb" hidden></p>
+   <div class="res__btns"><button class="btn btn--secondary" type="button" id="rAdjust">Adjust</button><button class="btn btn--secondary" type="button" id="rAnother">Try another look</button></div>
+   <div class="list rows" id="rRows">
+    <button class="row" type="button" data-info="in"><b>What's in it</b><span id="rInS">Plants and ground</span></button>
+    <button class="row" type="button" data-info="budget"><b>Budget and rebates</b><span id="rBudS">Your total, ways to save, rebates</span></button>
+    <button class="row" type="button" data-info="care"><b>Care and watering</b><span>Water use, yard care, this month</span></button>
+    <button class="row" type="button" data-info="quotes"><b>Get quotes from local pros</b><span>Licensed landscapers near you</span></button></div>
+   <p class="footnote legal">For planning only, not for construction. Call 811 before you dig.</p></div></div>`;
+  $('#rAdjust').onclick = openAdjust; $('#rAnother').onclick = () => step(2);
+  $$('#rRows [data-info]').forEach(b => b.onclick = () => openInfo(b.dataset.info));
+  if (re && !hasPhoto()) { F.render = { state: 'static' }; $('#rMedia').innerHTML = `<figure class="ba photo"><img class="ba__before" src="${esc(re.render || re.thumb)}" alt="Saved picture of your ${esc(styleName())} yard"><span class="ai-label">Saved plan</span></figure>`; }
+  else { await placeOnPhoto().catch(e => console.warn(e)); if (F.step === 3) startRender(false); }
+  try { await cost(); } catch (e) { console.warn(e); $('#rPrice').textContent = "We couldn't price this right now."; }
 }
-function drawMeasure(on) {
-  const c = $('#pMeasure'), img = $('#pBefore'); if (!c || !img) return; c.hidden = !on; if (!on) return;
-  const r = img.getBoundingClientRect(), d = devicePixelRatio || 1; c.width = r.width * d; c.height = r.height * d; const x = c.getContext('2d'), W = c.width, H = c.height;
-  // image is object-fit:cover inside the stage; map image fractions to the visible box
-  const iw = img.naturalWidth || 1, ih = img.naturalHeight || 1, k = Math.max(r.width / iw, r.height / ih), ox = (r.width - iw * k) / 2, oy = (r.height - ih * k) / 2;
-  const view = window.overlayApi.st?.view, flat = view === 'top' ? 1 : view === 'drone' ? .6 : .35;
-  x.lineWidth = 2 * d; x.font = `600 ${12 * d}px -apple-system, "Inter", system-ui, sans-serif`;
-  for (const p of window.overlayApi.projectItems()) {
-    const px = (ox + p.x * iw * k) * d, py = (oy + p.y * ih * k) * d, R = Math.max(10 * d, p.r * iw * k * d), pl = PLANTS.find(q => q.id === p.id);
-    x.setLineDash([6 * d, 4 * d]); x.strokeStyle = 'rgba(255,255,255,.95)'; x.beginPath(); x.ellipse(px, py, R, R * flat, 0, 0, 7); x.stroke(); x.setLineDash([]);
-    x.fillStyle = '#00C805'; x.strokeStyle = '#fff'; x.beginPath(); x.arc(px, py, 6 * d, 0, 7); x.fill(); x.stroke();
-    const t = `${pl?.name || p.id} · ${Math.round(PLANT3D[p.id]?.w || 3)} ft`, tw = x.measureText(t).width + 12 * d; x.fillStyle = 'rgba(20,20,22,.72)'; x.fillRect(px + 10 * d, py - 10 * d, tw, 20 * d); x.fillStyle = '#fff'; x.fillText(t, px + 16 * d, py + 4 * d);
+// Render: ETA progress (median of the last 20 renders, seeded 30 s), Cancel, 90 s timeout, retry, failure state. Never plant circles.
+let RS = 0, rTimer = null;
+const RKEY = 'yardplan.renderMs', medianMs = () => { try { const a = (JSON.parse(localStorage.getItem(RKEY)) || []).slice().sort((x, y) => x - y); return a.length ? a[a.length >> 1] : 30000; } catch { return 30000; } };
+function recordMs(ms) { try { const a = JSON.parse(localStorage.getItem(RKEY)) || []; a.push(Math.round(ms)); localStorage.setItem(RKEY, JSON.stringify(a.slice(-20))); } catch {} }
+function cancelRender() { RS++; clearInterval(rTimer); if (F.render?.state === 'rendering') F.render = { state: 'cancelled' }; }
+async function startRender(force) {
+  const my = ++RS; clearInterval(rTimer); const media = $('#rMedia'); if (!media) return;
+  const photoUrl = window.overlayApi?.imageUrl?.() || '';
+  if (!HAS_RENDER) { F.render = { state: 'sample', url: SAMPLE_RENDER }; showBA(photoUrl, SAMPLE_RENDER, true); $('#rH').textContent = `Your yard, ${styleName()}`; update(); return; }
+  F.render = { state: 'rendering', t0: Date.now() }; $('#rH').textContent = `Your yard, ${styleName()}`; update();
+  media.innerHTML = `<div class="render-wait" id="rWait" role="status" aria-live="polite"><img src="${photoUrl}" alt="" class="render-wait__photo"><div class="render-wait__sweep" aria-hidden="true"></div><div class="render-wait__panel"><p class="render-wait__msg" id="rMsg">Looking at your yard…</p><div class="bar"><i id="rBar" style="--p:2%"></i></div><p class="render-wait__eta"><span id="rEta"></span><button type="button" class="linkbtn" id="rCancel">Cancel</button></p></div></div>`;
+  $('#rCancel').onclick = () => { cancelRender(); step(2); };
+  const med = medianMs(), tau = med / 2.3, msgs = ['Looking at your yard…', 'Finding the ground and edges…', `Picking plants that grow ${near()}…`, 'Planting and mulching…', 'Adding finishing touches…'];
+  rTimer = setInterval(() => {
+    if (my !== RS) return clearInterval(rTimer); const t = Date.now() - F.render.t0, bar = $('#rBar'), msg = $('#rMsg'); if (!bar) return;
+    bar.style.setProperty('--p', (Math.min(.92, 1 - Math.exp(-t / tau)) * 100).toFixed(1) + '%');
+    const m = F.render.limited ? "Lots of yards are being drawn right now. We'll keep trying for a minute." : t > 45000 ? 'Taking a little longer than usual. Hang tight.' : msgs[Math.floor(t / 4000) % msgs.length];
+    if (msg.textContent !== m && (t - (F.render.ann || 0) > 4000 || F.render.limited || t > 45000)) { msg.textContent = m; F.render.ann = t; }
+    $('#rEta').textContent = t < med ? `About ${Math.max(1, Math.round((med - t) / 1000))} sec left · ` : '';
+    if (t > 90000) { RS++; clearInterval(rTimer); renderFailed('timeout'); }
+  }, 250);
+  for (let k = 0; k < 30 && !window.renderHook; k++) await sleep(100);
+  let code = 'unavailable';
+  for (let i = 0; i < 4; i++) {
+    let res = null, err = null;
+    try { res = await window.renderHook?.refresh?.(force || i > 0); } catch (e) { err = e; }
+    if (my !== RS) return;
+    const s = window.renderHook?.status || {}, url = res && !res.mock && (res.dataURL || res.imageUrl);
+    if (url) { clearInterval(rTimer); recordMs(Date.now() - F.render.t0); F.render = { state: 'done', url }; $('#rBar')?.style.setProperty('--p', '100%'); showBA(photoUrl, url, false); toast('Your yard is ready'); update(); return; }
+    code = err?.code || s.code || s.state || 'error';
+    if (/rate|429|limit|busy/i.test(`${code} ${s.message || ''} ${err?.message || ''}`) && i < 3) { F.render.limited = true; await sleep(5000 * 2 ** i); if (my !== RS) return; continue; }
+    break;
   }
+  clearInterval(rTimer); console.info('[yardplan] render failed:', code); renderFailed(code);
 }
-// ---------- 4 Tweak ----------
-const GROUNDS = [['lawn', 'Lawn'], ['dg', 'Decomposed granite'], ['gravel', 'Gravel'], ['mulch', 'Mulch']];
-function renderTweak() {
-  if (!F.design) buildDesign();
-  const P = F.plants.map(id => PLANTS.find(p => p.id === id)).filter(Boolean), w = { low: 'Low water', med: 'Some water', high: 'Needs regular water' };
-  $('#fTweak').innerHTML = `<h1>Make it yours</h1><p class="lead">Swap plants and materials.${HAS_RENDER ? ' Tap Update to see the change.' : ''}</p>
-   <div class="chips" role="tablist" aria-label="Tweak"><button class="chip" role="tab" aria-pressed="true" data-t="plants">Plants</button><button class="chip" role="tab" aria-pressed="false" data-t="ground">Ground</button></div>
-   <ul class="plist" data-panel="plants">${P.map(p => `<li><img src="img/plants/${p.id}.jpg" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><div><b>${esc(p.name)}</b><span>${p.sun.includes('full') ? 'Full sun' : p.sun.includes('part') ? 'Part shade' : 'Shade'} · ${w[p.water]} · ${esc(p.size)}</span></div><button class="btn btn--secondary btn--sm" data-swap="${p.id}" aria-label="Swap ${esc(p.name)}">Swap</button></li>`).join('')}</ul>
-   <div data-panel="ground" hidden><p class="footnote">The open area in the middle of the yard (about 480 sq ft).</p><div class="chips" role="radiogroup" aria-label="Ground">${GROUNDS.map(([k, n]) => `<button class="chip" role="radio" aria-pressed="${F.ground === k}" data-g="${k}">${n}</button>`).join('')}</div></div>
-   <button class="btn btn--ghost btn--sm" type="button" id="tAdjust" style="margin-top:16px">Adjust photo and camera</button>`;
-  $('#tAdjust').onclick = () => openSheet('#adjustSheet');
-  $$('#fTweak [data-t]').forEach(b => b.onclick = () => { $$('#fTweak [data-t]').forEach(x => x.setAttribute('aria-pressed', x === b)); $$('#fTweak [data-panel]').forEach(p => p.hidden = p.dataset.panel !== b.dataset.t); });
-  $$('#fTweak [data-g]').forEach(b => b.onclick = () => { F.ground = b.dataset.g; $$('#fTweak [data-g]').forEach(x => x.setAttribute('aria-pressed', x === b)); toast(HAS_RENDER ? 'Changed. Update the render to see it.' : 'Changed.'); });
-  $$('#fTweak [data-swap]').forEach(b => b.onclick = () => openSwap(b.dataset.swap));
+function renderFailed(code) {
+  F.render = { state: 'failed', code }; const media = $('#rMedia'); if (!media) return;
+  const photoUrl = window.overlayApi?.imageUrl?.() || '';
+  $('#rH').textContent = "We couldn't draw your yard this time";
+  media.innerHTML = `<figure class="ba photo"><img class="ba__before" src="${photoUrl}" alt="Your yard today"><span class="ai-label">${esc(styleName())} look</span></figure>
+   <div class="render-fail" role="status"><p>Your design and price are still here. Try again in a minute.</p><button type="button" class="linkbtn" id="rSaveAnyway">Save my plan anyway</button></div>`;
+  $('#rSaveAnyway').onclick = () => savePlan(); update();
 }
-function openSwap(id) {
-  const p = PLANTS.find(q => q.id === id), alts = PLANTS.filter(q => q.type === p.type && q.id !== id && fits(q) && !F.plants.includes(q.id)).slice(0, 12);
-  $('#swapT').textContent = `Swap ${p.name} for…`; $('#swapHelp').textContent = `These all grow well in Zone ${state.zoneLabel || 'your zone'} and fit this spot.`;
-  $('#swapList').innerHTML = alts.map(q => `<button class="prow" data-to="${q.id}"><img src="img/plants/${q.id}.jpg" alt="" decoding="sync" onerror="this.style.visibility='hidden'"><span><b>${esc(q.name)}</b><span>${esc(q.size)} · ${q.water === 'low' ? 'Low water' : q.water === 'med' ? 'Some water' : 'Needs regular water'}</span></span></button>`).join('') || '<p class="muted">No other matches for your zone.</p>';
-  $('#swapList').onclick = e => { const b = e.target.closest('[data-to]'); if (!b) return; F.plants = F.plants.map(x => x === id ? b.dataset.to : x); closeSheet('#swapSheet'); renderTweak(); toast(HAS_RENDER ? 'Swapped. Update the render to see it.' : 'Swapped.'); };
-  openSheet('#swapSheet');
-}
-// ---------- sheets ----------
-function openSheet(sel) { const d = $(sel); if (!d.open) d.showModal(); }
-function closeSheet(sel) { const d = $(sel); if (d.open) d.close(); }
-$$('dialog.sheet').forEach(d => { d.addEventListener('click', e => { if (e.target === d || e.target.closest('[data-close]') || e.target.closest('[data-go]')) d.close(); }); });
-$('#adjustSheet').addEventListener('click', async e => { const b = e.target.closest('[data-adj=rotate]'); if (b) { await window.overlayApi.rotatePhoto(); F.placed = false; if (F.step === 3) renderPreview(); toast('Rotated.'); }
-  const v = e.target.closest('[data-v]'); if (v) { window.overlayApi.setView(v.dataset.v); $$('#adjView .chip').forEach(x => x.setAttribute('aria-pressed', x === v)); F.placed = false; if (F.step === 3) renderPreview(); } });
-$('#adjustSheet').addEventListener('close', () => {});
-document.getElementById('adjustSheet').addEventListener('toggle', () => { const v = window.overlayApi?.st?.view; $$('#adjView .chip').forEach(x => x.setAttribute('aria-pressed', x.dataset.v === v)); });
-// ---------- 5 Plan ----------
-async function renderPlan() {
-  buildDesign(); const P = F.plants.map(id => PLANTS.find(p => p.id === id)).filter(Boolean);
-  $('#fPlan').innerHTML = `<h1>Your plan</h1>
-   <section class="estimate" aria-labelledby="estL"><p id="estL" class="footnote">${F.mode === 'diy' ? 'Estimated total · do it yourself' : 'Estimated total · hire a pro'}</p><p class="hero-number" id="pCost"><span class="skeleton skeleton--text" style="width:5ch;display:inline-block"></span></p>
-    <p class="footnote" id="pOf">of your ${money(F.budget)} budget · <button type="button" class="linkbtn" id="pBudgetEdit">Change</button></p>
-    <div class="meter" id="pMeter" role="meter" aria-label="Spending versus budget" aria-valuemin="0" aria-valuemax="${F.budget}" aria-valuenow="0"><i></i></div>
-    <p class="meter__status" id="pStatus" aria-live="polite"></p>
-    <div class="chips" role="radiogroup" aria-label="Who does the work"><button class="chip" role="radio" aria-pressed="${F.mode === 'diy'}" data-m="diy">DIY</button><button class="chip" role="radio" aria-pressed="${F.mode === 'pro'}" data-m="pro">Hire a pro</button></div>
-    <p class="callout" id="pRange"></p>
-    <div class="fit" id="pFit" aria-live="polite"></div>
-    <div class="rebate" id="pRebate" aria-live="polite"></div>
-    ${F.mode === 'pro' ? '<button class="btn btn--secondary btn--lg" type="button" id="pQuotes" style="width:100%;margin:8px 0">Get quotes from local pros</button>' : ''}<p class="footnote">An estimate from example prices${state.zip ? ' near ' + esc(state.zip) : ''}, not a quote. Prices change. Check with your store or contractor.</p></section>
-   <div class="cards2"><button class="card card--stat card--interactive" data-go="care"><span class="footnote">Watering plan</span><b class="num" id="pWater">…</b><span class="footnote" id="pWaterS">Estimating…</span></button>
-    <button class="card card--stat card--interactive" data-go="care"><span class="footnote">Care guide</span><b class="num">Month by month</b><span class="footnote">When to water, prune and feed. <u>Open guide</u></span></button></div>
-   <div class="sec"><h2>Plants</h2><span class="footnote" id="pBreak"></span></div>
-   <ul class="plist">${P.map(p => `<li><img src="img/plants/${p.id}.jpg" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><div><b>${esc(p.name)}</b><span>${esc(p.size)} · ${p.water === 'low' ? 'Low water' : p.water === 'med' ? 'Some water' : 'Needs regular water'}</span></div></li>`).join('')}</ul>
-   <div class="sec"><h2>Ground</h2><span class="footnote">${GROUNDS.find(g => g[0] === F.ground)?.[1] || ''} · mulched beds · paver path</span></div>
-   <p class="footnote legal">For planning only, not for construction. Call 811 before you dig.</p>`;
-  $$('#fPlan [data-m]').forEach(b => b.onclick = () => { setWho(b.dataset.m); renderPlan(); });
-  $('#pBudgetEdit').onclick = () => step(2);
-  const q = $('#pQuotes'); if (q) q.onclick = () => window.mpApi?.getQuotes({ bid: F.bid, takeoff: F.takeoff, zip: state.zip, style: styleName(), photo: window.overlayApi?.hasPhoto?.() ? window.overlayApi.imageUrl() : null, render: window.renderHook?.lastResult && !window.renderHook.lastResult.mock ? (window.renderHook.lastResult.dataURL || window.renderHook.lastResult.imageUrl) : null });
-  try { await cost(); } catch (e) { console.warn(e); $('#pCost').textContent = '—'; }
-  try { await water(); } catch (e) { $('#pWater').textContent = '—'; $('#pWaterS').textContent = 'Add your ZIP to estimate water use.'; }
+function showBA(before, after, sample) {
+  const media = $('#rMedia'); if (!media) return;
+  media.innerHTML = `<figure class="ba photo" id="rBA" style="--pos:50%"><img class="ba__before" src="${esc(before)}" alt="Your yard today"><div class="ba__after"><img src="${esc(after)}" alt="${sample ? 'Sample AI picture of a redesigned yard (not your yard)' : `AI picture of your yard as a ${esc(styleName())} garden`}"></div>
+    <span class="ba__tag ba__tag--l">Before</span><span class="ba__tag ba__tag--r">${sample ? 'Sample' : 'After'}</span><span class="ai-label">AI concept · not to scale</span>
+    <div class="ba__handle" role="slider" tabindex="0" aria-label="Before and after comparison" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div>
+    ${sample ? `<span class="sample-banner sample-banner--demo">${F.sample ? 'Sample yard and sample picture' : 'Sample picture · not your yard'}</span>` : F.sample ? '<span class="sample-banner">Sample yard: this isn\'t your home.</span>' : ''}</figure>
+   ${sample && !F.sample ? '<p class="sample-note" id="rSampleNote"><b>Demo mode.</b> Pictures of your own yard aren\'t switched on in this preview, so the "after" side is a sample picture of a different yard. Your plants, price and plan below are for your yard.</p>' : ''}`;
+  slider($('#rBA'));
 }
 async function cost() {
-  const P = await priceDesign(F.design), { t, bid, diy, pro } = P, total = totalFor(P), B = F.budget;
-  F.bid = bid; F.takeoff = t; F.plan = { diy, pro, plants: P.plantsDiy, materials: P.materialsDiy, budget: B, total, rebate: P.rebate?.amount || 0 };
-  $('#pCost').textContent = money(total);
-  const pct = Math.min(100, total / B * 100), over = total > B, m = $('#pMeter');
-  m.style.setProperty('--p', pct + '%'); m.classList.toggle('is-over', over); m.setAttribute('aria-valuenow', Math.round(total)); m.setAttribute('aria-valuetext', `${money(total)} of ${money(B)}`);
-  $('#pStatus').textContent = over ? `Over by ${money(total - B)}` : `Under budget by ${money(B - total)}`; $('#pStatus').className = 'meter__status ' + (over ? 'is-over' : 'is-under');
-  $('#pRange').textContent = F.mode === 'diy' ? `Materials ${money(P.materialsDiy)} · plants ${money(P.plantsDiy)}. Hiring a pro: about ${money(pro)}.` : `Priced the same way as a contractor's bid for this plan. Doing it yourself: about ${money(diy)} in materials and plants.`;
-  $('#pBreak').textContent = `${t.plants.reduce((a, p) => a + p.count, 0)} plants · ${money(P.plantsDiy)}`;
-  renderRebate(P.rebate, total);
-  fitSuggestions(total, over).catch(e => console.warn(e));
+  const P = await priceDesign(F.design), total = totalFor(P), B = F.budget;
+  F.bid = P.bid; F.takeoff = P.t; F.P = P; F.plan = { diy: P.diy, pro: P.pro, plants: P.plantsDiy, materials: P.materialsDiy, budget: B, total, rebate: P.rebate?.amount || 0, mode: F.mode };
+  const el = $('#rPrice'); if (el) { const over = total > B; el.className = 'price-line ' + (over ? 'is-over' : 'is-fit');
+    el.innerHTML = over ? `About ${money(total)} · ${money(total - B)} over your ${money(B)} budget <button type="button" class="linkbtn" id="rFit">Make it fit</button>` : `About ${money(total)} · fits your ${money(B)} budget`;
+    const f = $('#rFit'); if (f) f.onclick = makeFit;
+    const rb = $('#rReb'), amt = P.rebate?.amount || 0; rb.hidden = !(amt > 0); if (amt > 0) rb.textContent = `Up to ${money(amt)} back in local rebates`;
+    const n = P.t.plants.reduce((a, p) => a + p.count, 0); $('#rInS').textContent = `${n} plants · ${groundName(F.ground)}`;
+    $('#rBudS').textContent = `${F.mode === 'diy' ? 'Doing it yourself' : 'Hiring a pro'} · ${money(total)}${amt > 0 ? ` · up to ${money(amt)} back` : ''}`; }
+  update(); return P;
 }
-// Turf-removal rebate: amount, net after rebate, pre-approval, source, and a utility check when we only matched the ZIP.
-function renderRebate(r, total) {
-  const el = $('#pRebate'), sf = turfSf(F.base), est = !F.turfSf;
-  const turf = `<label class="rebate__turf">Grass you're replacing <span class="inwrap"><input id="pTurf" inputmode="numeric" value="${sf}" aria-label="Square feet of grass you're replacing"> sq ft</span></label>${est ? '<small class="footnote">Our guess from the new beds and paths. Change it to match your lawn.</small>' : ''}`;
+async function makeFit() {
+  const m = BF || await loadCostMods(); if (F.plan && F.plan.total <= F.budget && !F.tier) { toast('Your plan already fits your budget.'); return; } const f = m.fitBudget(fitReq(F.base));
+  if (f.belowMinimum) { toast(`Even the simplest version is about ${money(f.minViable)}. Try a smaller look or raise the budget.`); return; }
+  F.manual = null; F.tier = 'better'; buildDesign(); const P = await cost(); toast(`Trimmed to fit: ${money(totalFor(P))}`);
+  if ($('#infoSheet').open && $('#infoSheet').dataset.kind === 'budget') renderBudgetSheet();
+}
+// ---------- save + share ----------
+const PKEY = 'yardplan.plans.v1'; const plans = () => { try { return JSON.parse(localStorage.getItem(PKEY)) || []; } catch { return []; } };
+async function small(u, max = 360) { if (!u) return null; try { const im = new Image(); im.crossOrigin = 'anonymous'; im.src = u; await im.decode(); const c = document.createElement('canvas'), k = max / Math.max(im.naturalWidth || 1, im.naturalHeight || 1); c.width = Math.round((im.naturalWidth || 1) * k); c.height = Math.round((im.naturalHeight || 1) * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', .7); } catch { return null; } }
+async function savePlan() {
+  try { const list = plans().filter(p => p.id !== F.savedId), now = new Date(), id = F.savedId || now.getTime().toString(36);
+    const photo = hasPhoto() ? await small(window.overlayApi.imageUrl(), 240) : null, rend = F.render?.state === 'done' ? await small(F.render.url, 480) : null;
+    list.unshift({ id, name: `${styleName()} yard`, style: F.style, plants: F.plants, ground: F.ground, tier: F.tier, manual: F.manual, budget: F.budget, mode: F.mode, zip: state.zip, zone: state.zoneLabel, place: place(), cost: F.plan,
+      thumb: rend || photo || `img/styles/${F.style}-800.webp`, render: rend, sampleRender: F.render?.state === 'sample', created: now.toISOString() });
+    localStorage.setItem(PKEY, JSON.stringify(list.slice(0, 20))); F.saved = true; F.savedId = id; update(); updateNav(); renderPlans(); toast('Saved to My plans on this device.'); }
+  catch (e) { console.warn(e); toast("We couldn't save right now. Your design is still here. Try again."); }
+}
+async function share() {
+  const url = F.render?.url || (hasPhoto() ? window.overlayApi.imageUrl() : `img/styles/${F.style}-800.webp`), text = `My Yardplan design: ${styleName()} look, about ${money(F.plan?.total)}.`;
+  try { const blob = await (await fetch(url)).blob(), file = new File([blob], `yardplan-${F.style}.jpg`, { type: blob.type || 'image/jpeg' });
+    if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: 'My Yardplan design', text }); return; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file.name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); toast('Picture downloaded.');
+  } catch (e) { if (e?.name !== 'AbortError') { console.warn(e); toast("Couldn't share right now. Try again."); } }
+}
+// ---------- sheets ----------
+let opener = null;
+function openSheet(sel) { const d = $(sel); opener = document.activeElement; if (!d.open) d.showModal(); }
+function closeSheet(sel) { const d = $(sel); if (d.open) d.close(); }
+$$('dialog.sheet').forEach(d => { d.addEventListener('click', e => { if (e.target === d || e.target.closest('[data-close]') || e.target.closest('[data-go]')) d.close(); }); d.addEventListener('close', () => { if (opener?.isConnected) opener.focus({ preventScroll: true }); }); });
+// Detail sheets from the result rows
+async function openInfo(kind) {
+  if (kind === 'quotes') return window.mpApi?.getQuotes({ bid: F.bid, takeoff: F.takeoff, zip: state.zip, style: styleName(), photo: hasPhoto() ? window.overlayApi.imageUrl() : null, render: F.render?.state === 'done' ? F.render.url : null });
+  const d = $('#infoSheet'); d.dataset.kind = kind; $('#infoBody').innerHTML = '';
+  $('#infoT').textContent = { in: "What's in it", budget: 'Budget and rebates', care: 'Care and watering' }[kind];
+  openSheet('#infoSheet');
+  if (kind === 'in') renderInSheet(); if (kind === 'budget') renderBudgetSheet(); if (kind === 'care') renderCareSheet();
+}
+function plantRows() { const c = {}; (F.design?.items || []).filter(i => i.kind === 'plant').forEach(i => c[i.id] = (c[i.id] || 0) + 1);
+  return Object.entries(c).map(([id, n]) => ({ p: PLANTS.find(q => q.id === id), n })).filter(r => r.p); }
+function renderInSheet() {
+  const rows = plantRows();
+  $('#infoBody').innerHTML = `<ul class="plist">${rows.map(({ p, n }) => `<li><img src="img/plants/${p.id}.jpg" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><div><b>${esc(p.name)}${n > 1 ? ` <span class="muted">× ${n}</span>` : ''}</b><span>${sunOf(p)} · ${waterOf(p)} · ${Math.round(PLANT_SIZE[p.id]?.w || 3)} ft wide</span></div></li>`).join('')}</ul>
+   <p class="footnote"><b>Ground:</b> ${esc(groundName(F.ground))} in the middle · mulched beds · ${F.design.items.some(i => i.kind === 'path') ? 'paver path' : 'crushed rock path'}</p>
+   <button class="btn btn--secondary btn--block" type="button" id="inDl">Download plant list</button>
+   <p class="footnote legal">For planning only, not for construction. Call 811 before you dig.</p>`;
+  $('#inDl').onclick = () => { const csv = 'Plant,Botanical name,Count,Sun,Water,Width (ft)\n' + rows.map(({ p, n }) => [p.name, p.sci, n, sunOf(p), waterOf(p), Math.round(PLANT_SIZE[p.id]?.w || 3)].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `yardplan-${F.style}-plants.csv`; document.body.append(a); a.click(); a.remove(); };
+}
+const COVERED = ['CA', 'NV', 'AZ', 'CO', 'TX'];
+async function renderBudgetSheet() {
+  const el = $('#infoBody'); el.innerHTML = '<p class="footnote"><span class="skeleton skeleton--text" style="width:20ch;display:inline-block"></span></p>';
+  const P = F.P || await cost(), total = totalFor(P), B = F.budget, over = total > B, pct = Math.min(100, total / B * 100);
+  let asOf = ''; try { asOf = (await import('./contractor/data/rebates.js')).REBATES_META?.asOf || ''; } catch {}
+  el.innerHTML = `<section class="estimate"><p class="footnote">${F.mode === 'diy' ? 'Doing it yourself' : 'Hiring a pro'}</p><p class="hero-number">${money(total)}</p>
+    <div class="meter${over ? ' is-over' : ''}" role="meter" aria-label="Spending versus budget" aria-valuemin="0" aria-valuemax="${B}" aria-valuenow="${Math.round(total)}" aria-valuetext="${money(total)} of ${money(B)}" style="--p:${pct}%"><i></i></div>
+    <p class="meter__status ${over ? 'is-over' : 'is-under'}">${over ? `${money(total - B)} over your ${money(B)} budget` : `Fits your ${money(B)} budget`}</p>
+    <p class="callout">Doing it yourself: about ${money(P.diy)} · Hiring a pro: about ${money(P.pro)}</p></section>
+   <div class="fit" id="pFit" aria-live="polite"></div><div class="rebate" id="pRebate" aria-live="polite"></div>
+   <p class="footnote">An estimate from example prices near ${esc(state.zip || 'you')}, not a quote.${asOf ? ` Rebate rules checked ${esc(new Date(asOf + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }))}.` : ''}</p>`;
+  renderRebate($('#pRebate'), P.rebate, total, false);
+  fitRows(total, over).catch(e => console.warn(e));
+}
+// Budget fits (contractor/budget-fit.js), relabeled for homeowners: Save more · Fits budget · Go bigger · As designed.
+async function fitRows(total, over) {
+  const el = $('#pFit'), m = BF || await loadCostMods(), req = fitReq(F.base), tiers = m.fitTiers(req), rows = [];
+  const NAMES = { good: 'Save more', better: 'Fits budget', best: 'Go bigger' };
+  for (const k of ['good', 'better', 'best']) { const f = tiers[k], ed = editsOf(f); rows.push({ k, n: Object.keys(ed).length, tot: totalFor(await priceDesign(applyEdits(F.base, ed))), below: f.belowMinimum, min: f.minViable }); }
+  const designed = totalFor(await priceDesign(F.base));
+  const better = tiers.better, by = {}; for (const c of better.changes) by[c.itemIndex] = (by[c.itemIndex] || 0) + c.saved;
+  const curEd = F.edits || {}, singles = Object.entries(by).filter(([i, sv]) => sv > 0 && !(i in curEd)).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([i, sv]) => {
+    const sel = better.selections[+i], it = F.base.items[+i], nm = it.kind === 'plant' ? (PLANTS.find(p => p.id === it.id)?.name || 'Plant') : ({ path: 'Paver path', dg: 'Crushed rock area', mulch: 'Mulch bed', gravel: 'Gravel area', lawn: 'Lawn', wall: 'Wall' }[it.kind] || it.kind);
+    return { i: +i, sv, label: `${nm}: ${sel.label.toLowerCase()}`, item: sel.item }; });
+  if (!el?.isConnected) return;
+  const cur = F.manual ? 'custom' : F.tier || 'designed', row = (id, name, sub, tot) => `<button type="button" class="fit__row${cur === id ? ' is-on' : ''}" data-tier="${id}" role="radio" aria-checked="${cur === id}"><span>${name}<small>${sub}</small></span><b class="${tot <= F.budget ? 'is-save' : ''}">${money(tot)}</b></button>`;
+  const seen = new Set(), uniq = rows.filter(r => { if (!r.n || seen.has(r.tot)) return false; seen.add(r.tot); return true; });
+  el.innerHTML = `<p class="fit__h">${over ? 'Ways to fit your budget' : 'Other versions'}</p>`
+    + (over && singles.length ? singles.map((r, j) => `<button type="button" class="fit__row" data-one="${j}"><span>${esc(r.label)}<small>One change</small></span><b class="is-save">−${money(r.sv)}</b></button>`).join('') : '')
+    + (uniq.length ? uniq.map(r => row(r.k, NAMES[r.k], r.below ? 'The simplest version of this look' : `${r.n} change${r.n === 1 ? '' : 's'}`, r.tot)).join('') : '<p class="footnote">Your full design fits your budget, so there\'s nothing to cut.</p>')
+    + row('designed', 'As designed', 'Every plant and path as planned', designed)
+    + (rows[1].below ? `<p class="footnote">Even the simplest version is about ${money(rows[1].min || rows[0].tot)}. Try a smaller look or raise the budget.</p>` : '');
+  el.querySelectorAll('[data-tier]').forEach(b => b.onclick = async () => { const t = b.dataset.tier; F.manual = null; F.tier = t === 'designed' ? null : t; buildDesign(); await cost(); renderBudgetSheet(); toast(t === 'designed' ? 'Back to the full design.' : `Switched to ${NAMES[t]}.`); });
+  el.querySelectorAll('[data-one]').forEach(b => b.onclick = async () => { const r = singles[+b.dataset.one]; F.manual = { ...(F.edits || {}), [r.i]: r.item ? { ...r.item } : null }; buildDesign(); await cost(); renderBudgetSheet(); toast(`Saved about ${money(r.sv)}.`); });
+}
+// Turf-removal rebate card. withInputs: lawn size + water company (Adjust → Rebates).
+function renderRebate(el, r, total, withInputs) {
+  if (!el) return; const sf = turfSf(F.base), st = usState();
+  const inputs = withInputs ? `<label class="rebate__turf">Lawn you're replacing: about <span class="inwrap"><input id="pTurf" inputmode="numeric" value="${sf}" aria-label="Square feet of lawn you're replacing"> sq ft</span></label>${utilityPick(r)}` : '';
   if (!state.zip) { el.innerHTML = ''; return; }
-  if (!r || !r.amount) { el.innerHTML = `<div class="rebate__card"><p class="rebate__h">No turf rebate found${r?.notes?.length ? '' : ` for ZIP ${esc(state.zip)}`}</p>${(r?.notes || []).map(n => `<p class="footnote">${esc(n)}</p>`).join('')}${turf}${utilityPick(r)}</div>`; bindRebate(); return; }
-  const pr = r.programs[0], names = r.programs.map(p => esc(p.name)).join(' + ');
-  el.innerHTML = `<div class="rebate__card"><p class="rebate__h">Rebate: up to ${money(r.amount)} from ${names}</p>
-    <p class="rebate__net">Net after rebate: <b>${money(Math.max(0, total - r.amount))}</b></p>
-    ${r.preApprovalRequired ? `<p class="footnote"><b>Get pre-approval before you remove any grass.</b> It's paid back as a reimbursement after the work${r.programs.some(p => p.effectiveTo) ? `; this offer runs until ${esc(new Date(r.programs.find(p => p.effectiveTo).effectiveTo + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }))}` : ''}. Your budget bar doesn't count it.</p>` : ''}
-    ${r.programs.map(p => `<p class="footnote">Source: <a href="${esc(p.sourceUrl)}" target="_blank" rel="noopener">${esc(p.name)}</a></p>`).join('')}
-    ${turf}${utilityPick(r)}</div>`;
+  if (!r || !r.amount) { el.innerHTML = `<div class="rebate__card"><p class="rebate__h">No rebate matched</p><p class="footnote">${COVERED.includes(st) || !st ? "No lawn-replacement rebate matched your ZIP right now. Programs change, so check your water company's site." : `We don't track rebates in ${esc(st)} yet. Your water company may still offer one.`}</p>${inputs}</div>`; bindRebate(); return; }
+  const names = r.programs.map(p => esc(p.name)).join(' + ');
+  el.innerHTML = `<div class="rebate__card"><p class="rebate__h">Up to ${money(r.amount)} back from ${names}</p>
+    <p class="rebate__net">After the rebate: <b>${money(Math.max(0, total - r.amount))}</b></p>
+    ${r.preApprovalRequired ? `<p class="footnote"><b>Get approval before you remove any grass.</b> The rebate is paid back after the work${r.programs.some(p => p.effectiveTo) ? `; this offer runs until ${esc(new Date(r.programs.find(p => p.effectiveTo).effectiveTo + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }))}` : ''}. Your budget doesn't count it.</p>` : ''}
+    ${r.programs.map(p => `<p class="footnote">Source: <a href="${esc(p.sourceUrl)}" target="_blank" rel="noopener">${esc(p.name)}</a></p>`).join('')}${inputs}</div>`;
   bindRebate();
 }
 // Programs that serve this ZIP, so the user can say which utility bills them for water.
@@ -294,66 +377,94 @@ function utilityPick(r) {
   const cands = REB.filter(x => x.verified && !x.addOnOnly && (x.zipPrefixes || []).some(p => state.zip.startsWith(p)));
   const agencies = [...new Map(cands.map(x => [x.agency, x.utilities[0]])).entries()];
   if (!agencies.length || (!r?.needsUtilityConfirmation && !F.utility)) return '';
-  return `<div class="rebate__util">${r?.needsUtilityConfirmation ? '<p class="footnote"><b>Confirm your water utility.</b> We matched by ZIP only, and utility areas don\'t follow ZIPs. Check the name on your water bill.</p>' : ''}
-    <label class="field">Water utility<select id="pUtil"><option value="">Not sure (show the most conservative)</option>${agencies.map(([a, u]) => `<option value="${esc(u)}"${F.utility === u ? ' selected' : ''}>${esc(a)}</option>`).join('')}</select></label></div>`;
+  return `<div class="rebate__util">${r?.needsUtilityConfirmation ? '<p class="footnote"><b>Which water company bills you?</b> We matched by ZIP only. Check the name on your water bill.</p>' : ''}
+    <label class="field">Water company<select id="pUtil"><option value="">Not sure (show the most conservative)</option>${agencies.map(([a, u]) => `<option value="${esc(u)}"${F.utility === u ? ' selected' : ''}>${esc(a)}</option>`).join('')}</select></label></div>`;
 }
 function bindRebate() {
-  const tf = $('#pTurf'); if (tf) tf.onchange = () => { const v = Math.max(0, Math.round(+tf.value.replace(/[^\d.]/g, '') || 0)); F.turfSf = v; localStorage.setItem('yardplan.turfSf', v || ''); cost().catch(e => console.warn(e)); };
-  const u = $('#pUtil'); if (u) u.onchange = () => { F.utility = u.value; localStorage.setItem('yardplan.utility', u.value); cost().catch(e => console.warn(e)); };
+  const tf = $('#pTurf'); if (tf) tf.onchange = () => { const v = Math.max(0, Math.round(+tf.value.replace(/[^\d.]/g, '') || 0)); F.turfSf = v; localStorage.setItem('yardplan.turfSf', v || ''); repriced(); };
+  const u = $('#pUtil'); if (u) u.onchange = () => { F.utility = u.value; localStorage.setItem('yardplan.utility', u.value); repriced(); };
 }
-// Budget fit (contractor/budget-fit.js): Good / Better / Best fits of the designed plan, plus the biggest single savings.
-async function fitSuggestions(total, over) {
-  const el = $('#pFit'), m = BF || await loadCostMods(), req = fitReq(F.base);
-  const tiers = m.fitTiers(req), rows = [];
-  const NAMES = { good: ['Good', 'Saves the most'], better: ['Better', 'Fits your budget'], best: ['Best', 'Closest to the full design'] };
-  for (const k of ['good', 'better', 'best']) { const f = tiers[k], ed = editsOf(f), d = applyEdits(F.base, ed), tot = totalFor(await priceDesign(d));
-    rows.push({ k, ed, tot, n: Object.keys(ed).length, impact: Math.round(f.impactScore * 100), below: f.belowMinimum }); }
-  const designed = totalFor(await priceDesign(F.base));
-  // single changes from the Better fit, grouped per item (largest saving first)
-  const better = tiers.better, by = {}; for (const c of better.changes) by[c.itemIndex] = (by[c.itemIndex] || 0) + c.saved;
-  const curEd = F.edits || {}, singles = Object.entries(by).filter(([i, sv]) => sv > 0 && !(i in curEd)).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([i, sv]) => {
-    const sel = better.selections[+i], it = F.base.items[+i], nm = it.kind === 'plant' ? (PLANTS.find(p => p.id === it.id)?.name || 'Plant') : ({ path: 'Paver path', dg: 'DG area', mulch: 'Mulch bed', gravel: 'Gravel area', lawn: 'Lawn', wall: 'Wall' }[it.kind] || it.kind);
-    return { i: +i, sv, label: `${nm}: ${sel.label.toLowerCase()}`, item: sel.item }; });
-  if (F.step !== 5) return;
-  const cur = F.manual ? 'custom' : F.tier || 'designed', fmtRow = (id, name, sub, tot) => `<button type="button" class="fit__row${cur === id ? ' is-on' : ''}" data-tier="${id}" aria-pressed="${cur === id}"><span>${name}<small>${sub}</small></span><b class="${tot <= F.budget ? 'is-save' : ''}">${money(tot)}</b></button>`;
-  el.innerHTML = `<p class="fit__h">${over ? 'Fit to budget' : 'Ways to spend your budget'}</p>`
-    + (over && singles.length ? singles.map((r, j) => `<button type="button" class="fit__row" data-one="${j}"><span>${esc(r.label)}<small>One change</small></span><b class="is-save">−${money(r.sv)}</b></button>`).join('') : '')
-    + (!over && rows.every(r => !r.n) ? `<p class="footnote">Your full design fits your budget with room to spare, so there's nothing to cut.</p>` : rows.map(r => fmtRow(r.k, `${NAMES[r.k][0]} · ${money(Math.round(F.budget * m.TIER_MULTS[r.k]))} target`, r.below ? 'Leanest version of this design' : `${NAMES[r.k][1]} · ${r.n ? `${r.n} change${r.n === 1 ? '' : 's'}, keeps ${r.impact}% of the look` : 'nothing cut'}`, r.tot)).join(''))
-    + fmtRow('designed', 'As designed', 'Every plant and path as planned', designed)
-    + (over && !rows[1].below ? `<button type="button" class="btn btn--secondary btn--block" id="pFitAll">Fit to budget · ${money(rows[1].tot)}</button>` : '')
-    + (rows[1].below ? `<p class="footnote">Even the leanest version of this design is over ${money(F.budget)}. Try a lower-cost style or raise the budget.</p>` : '')
-    + '<p class="footnote">Fits keep grading, drainage and irrigation as designed. Fit targets include a 10–15% contingency.</p>';
-  el.querySelectorAll('[data-tier]').forEach(b => b.onclick = () => { const t = b.dataset.tier; F.manual = null; F.tier = t === 'designed' ? null : t; F.placed = false; renderPlan(); toast(t === 'designed' ? 'Back to the full design.' : `Switched to the ${NAMES[t][0]} fit.`); });
-  el.querySelectorAll('[data-one]').forEach(b => b.onclick = () => { const r = singles[+b.dataset.one]; F.manual = { ...(F.edits || {}), [r.i]: r.item ? { ...r.item } : null }; F.placed = false; renderPlan(); toast(`Saved about ${money(r.sv)}.`); });
-  const fa = $('#pFitAll'); if (fa) fa.onclick = () => { F.manual = null; F.tier = 'better'; F.placed = false; renderPlan(); toast('Fitted to your budget.'); };
+const repriced = () => cost().then(() => { if ($('#adjustSheet').open) renderAdjRebate(); if ($('#infoSheet').open && $('#infoSheet').dataset.kind === 'budget') renderBudgetSheet(); }).catch(e => console.warn(e));
+async function renderCareSheet() {
+  const el = $('#infoBody'); el.innerHTML = '<p class="footnote">Working out your care plan… (loads local climate data the first time)</p>';
+  try { if (!state.zip) throw new Error('zip'); await window.careApi.show(true); const g = window.careApi.guide; if (!g) throw new Error('guide');
+    const G = g.maintenance, W = g.irrigation.waterUse, Mw = g.irrigation.mwelo, m = new Date().getMonth(), byId = new Map(G.tasks.map(t => [t.id, t]));
+    let nm = m, up = []; for (let k = 0; k < 12 && !up.length; k++) { nm = (m + k) % 12; up = (G.months[nm]?.tasks || []).map(id => byId.get(id)).filter(Boolean); }
+    const MN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    if (!el.isConnected || $('#infoSheet').dataset.kind !== 'care') return;
+    el.innerHTML = `<div class="care-nums"><div class="card card--stat"><span class="footnote">Water</span><b class="num">${Math.round(W.annualGallons).toLocaleString()} gal</b><span class="footnote">a year · ${W.savingsPct}% less than lawn</span></div>
+      <div class="card card--stat"><span class="footnote">Yard care</span><b class="num">~${Math.round(G.annual.hours)} hours</b><span class="footnote">a year, doing it yourself</span></div>
+      <div class="card card--stat"><span class="footnote">${nm === m ? 'This month' : 'Next up: ' + MN[nm]}</span><b class="num care-task">${esc(up[0]?.title || 'Nothing to do')}</b><span class="footnote">${up.length > 1 ? `+ ${up.length - 1} more` : ''}</span></div></div>
+      ${Mw && Mw.compliant === false && usState() === 'CA' ? '<p class="callout">This plan may use more water than California allows for new yards. A pro can check it.</p>' : ''}
+      <button class="btn btn--primary btn--block btn--lg" type="button" id="cCal">Add to calendar</button>
+      <button class="btn btn--secondary btn--block" type="button" id="cPdf" style="margin-top:8px">Download care guide (PDF)</button>
+      <p class="footnote">A planning guide based on your local climate, not an engineered irrigation design.</p>`;
+    $('#cCal').onclick = () => g.exportIcs();
+    const pdf = document.querySelector('#careOut [data-act=pdf]'); $('#cPdf').disabled = !pdf || pdf.disabled; $('#cPdf').onclick = () => pdf?.click();
+  } catch (e) { console.warn(e); if (el.isConnected) el.innerHTML = '<p class="footnote">Add your ZIP to see watering and care for your area.</p>'; }
 }
-async function water() {
-  if (!state.zip) throw new Error('no zip');
-  const [irr, loc, cat] = await Promise.all([import('./guides/irrigation.js'), import('./guides/location.js'), import('./guides/catalog.js')]);
-  const location = loc.getLocation(state.zip, { zone: state.zoneLabel || undefined }); if (!location) throw new Error('zip');
-  const plan = irr.generateIrrigationPlan(F.design, { zip: state.zip, location, catalog: cat.catalogFromGlobals({ PLANTS, PLANT3D }) }), w = plan.waterUse;
-  $('#pWater').textContent = `${w.savingsPct}% less`; $('#pWaterS').textContent = `About ${w.annualGallons.toLocaleString()} gal a year vs. an all-lawn yard.`;
+// ---------- the Adjust sheet (one sheet, rows expand inline) ----------
+let dirty = false, swapOpen = null;
+let adjStart = null;
+function openAdjust() { dirty = false; swapOpen = null; adjStart = { b: F.budget, m: F.mode }; renderAdjust(); openSheet('#adjustSheet'); }
+function setDirty() { dirty = true; $('#adjDone').textContent = 'Update my yard'; }
+function renderAdjust() {
+  const P = F.plants.map(id => PLANTS.find(p => p.id === id)).filter(Boolean), v = window.overlayApi?.st?.view;
+  $('#adjBody').innerHTML = `
+   <details class="adj" data-row="budget"><summary>Budget <span>${money(F.budget)} · ${F.mode === 'diy' ? 'Doing it yourself' : 'Hiring a pro'}</span></summary>
+    <p class="adj__val" id="adjBudgetVal">${money(F.budget)}</p><input type="range" id="adjRange" min="0" max="100" step="1" aria-label="Budget" class="budget__range">
+    <div class="seg2" role="radiogroup" aria-label="Who does the work" id="adjWho"><button type="button" role="radio" aria-checked="${F.mode === 'diy'}" data-m="diy">Doing it yourself</button><button type="button" role="radio" aria-checked="${F.mode === 'pro'}" data-m="pro">Hiring a pro</button></div>
+    <button class="btn btn--secondary btn--block" type="button" id="adjFit">Make it fit</button></details>
+   <details class="adj" data-row="swap"${swapOpen ? ' open' : ''}><summary>Swap a plant <span>${P.length} plants</span></summary>
+    <ul class="plist">${P.map(p => `<li><img src="img/plants/${p.id}.jpg" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><div><b>${esc(p.name)}</b><span>${sunOf(p)} · ${waterOf(p)}</span></div><button class="btn btn--secondary btn--sm" type="button" data-swap="${p.id}" aria-expanded="${swapOpen === p.id}" aria-label="Swap ${esc(p.name)}">Swap</button></li>${swapOpen === p.id ? `<li class="swaplist"><div class="pick">${swapAlts(p).map(q => `<button class="prow" type="button" data-to="${q.id}"><img src="img/plants/${q.id}.jpg" alt="" onerror="this.style.visibility='hidden'"><span><b>${esc(q.name)}</b><span>${esc(q.size)} · ${waterOf(q)}</span></span></button>`).join('') || '<p class="muted">No other matches for your area.</p>'}</div></li>` : ''}`).join('')}</ul></details>
+   <details class="adj" data-row="ground"><summary>Ground <span>${esc(groundName(F.ground))}</span></summary>
+    <div class="chips" role="radiogroup" aria-label="Ground">${GROUNDS.map(([k, n]) => `<button class="chip" type="button" role="radio" aria-checked="${F.ground === k}" aria-pressed="${F.ground === k}" data-g="${k}">${n}</button>`).join('')}</div></details>
+   <details class="adj" data-row="rebates"><summary>Rebates <span id="adjRebS">${F.plan?.rebate ? 'Up to ' + money(F.plan.rebate) : 'Check yours'}</span></summary><div id="adjReb"></div></details>
+   <details class="adj" data-row="photo"><summary>Photo <span>Rotate or fix the view</span></summary>
+    <div class="chips"><button class="chip" type="button" data-adj="rotate">Rotate</button></div>
+    <p class="footnote">Wrong view?</p><div class="chips" id="adjView" role="radiogroup" aria-label="View"><button class="chip" type="button" role="radio" data-v="ground" aria-checked="${v === 'ground'}">Ground</button><button class="chip" type="button" role="radio" data-v="drone" aria-checked="${v === 'drone'}">Drone</button><button class="chip" type="button" role="radio" data-v="top" aria-checked="${v === 'top'}">From above</button></div></details>
+   <details class="adj" data-row="location"><summary>Location <span>${esc(place() || state.zip || 'Not set')}</span></summary>
+    <label class="field">ZIP code<input id="adjZip" class="input" inputmode="numeric" maxlength="5" autocomplete="postal-code" value="${esc(state.zip || '')}"></label><p class="footnote" id="adjZipMsg" aria-live="polite"></p></details>`;
+  $('#adjDone').textContent = dirty ? 'Update my yard' : 'Done';
+  setBudget(F.budget); renderAdjRebate();
+  const b = $('#adjBody');
+  b.querySelector('#adjRange').oninput = e => { setBudget(fromT(+e.target.value)); clearTimeout(renderAdjust.t); renderAdjust.t = setTimeout(repriced, 250); };
+  b.querySelectorAll('#adjWho [data-m]').forEach(x => x.onclick = () => { setWho(x.dataset.m); repriced(); });
+  b.querySelector('#adjFit').onclick = makeFit;
+  b.querySelectorAll('[data-swap]').forEach(x => x.onclick = () => { swapOpen = swapOpen === x.dataset.swap ? null : x.dataset.swap; renderAdjust(); b.querySelector(`[data-swap="${x.dataset.swap}"]`)?.focus(); });
+  b.querySelectorAll('[data-to]').forEach(x => x.onclick = () => { const was = swapOpen; F.plants = F.plants.map(i => i === was ? x.dataset.to : i); swapOpen = null; setDirty(); renderAdjust(); toast('Swapped. Tap Update my yard to see it.'); });
+  b.querySelectorAll('[data-g]').forEach(x => x.onclick = () => { F.ground = x.dataset.g; b.querySelectorAll('[data-g]').forEach(y => { y.setAttribute('aria-checked', String(y === x)); y.setAttribute('aria-pressed', String(y === x)); }); b.querySelector('[data-row=ground] summary span').textContent = groundName(F.ground); setDirty(); });
+  b.querySelector('[data-adj=rotate]').onclick = async () => { await window.overlayApi.rotatePhoto(); F.placed = false; setDirty(); toast('Rotated.'); };
+  b.querySelectorAll('#adjView [data-v]').forEach(x => x.onclick = () => { window.overlayApi.setView(x.dataset.v); b.querySelectorAll('#adjView [data-v]').forEach(y => y.setAttribute('aria-checked', String(y === x))); F.placed = false; setDirty(); });
+  const z = b.querySelector('#adjZip'); z.oninput = () => { const v2 = z.value.replace(/\D/g, '').slice(0, 5); z.value = v2; if (v2.length === 5 && v2 !== state.zip) { $('#zip').value = v2; $('#zipForm').requestSubmit(); $('#adjZipMsg').textContent = 'Looking up your area…'; setDirty(); } };
 }
-// ---------- My plans ----------
-const PKEY = 'yardplan.plans.v1'; const plans = () => { try { return JSON.parse(localStorage.getItem(PKEY)) || []; } catch { return []; } };
-async function thumb() { const u = window.overlayApi?.imageUrl?.(); if (!u || !window.overlayApi.hasPhoto()) return `img/styles/${F.style}-800.webp`;
-  const im = new Image(); im.src = u; await im.decode().catch(() => {}); const c = document.createElement('canvas'), k = 240 / Math.max(im.naturalWidth || 1, im.naturalHeight || 1); c.width = (im.naturalWidth || 1) * k; c.height = (im.naturalHeight || 1) * k; c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', .7); }
-async function savePlan() {
-  try { const list = plans(), now = new Date(); list.unshift({ id: now.getTime().toString(36), name: `${styleName()} yard`, style: F.style, plants: F.plants, ground: F.ground, zip: state.zip, zone: state.zoneLabel, cost: F.plan, thumb: await thumb(), created: now.toISOString() });
-    localStorage.setItem(PKEY, JSON.stringify(list.slice(0, 20))); F.saved = true; update(); toast('Design saved'); renderPlans(); }
-  catch (e) { toast("We couldn't save right now. Your design is still here. Try again."); }
-}
+const swapAlts = p => PLANTS.filter(q => q.type === p.type && q.id !== p.id && fits(q) && !F.plants.includes(q.id)).slice(0, 8);
+function renderAdjRebate() { const el = $('#adjReb'); if (!el || !F.P) return; renderRebate(el, F.P.rebate, totalFor(F.P), true); $('#adjRebS').textContent = F.P.rebate?.amount ? 'Up to ' + money(F.P.rebate.amount) : 'Check yours'; }
+window.addEventListener('yardplan:zone', () => { const m = $('#adjZipMsg'); if (m && state.zone) m.textContent = `${place() || 'ZIP ' + state.zip} · plants picked for your area.`; });
+$('#adjDone').onclick = async () => { closeSheet('#adjustSheet');
+  if (dirty) { dirty = false; F.manual = null; F.placed = false; F.saved = false; F.reopened = null; if (F.step === 3) renderResult(); }
+  else if (F.step === 3) { if (F.tier && !F.manual && adjStart && (adjStart.b !== F.budget || adjStart.m !== F.mode)) buildDesign(); cost().catch(e => console.warn(e)); } };
+// ---------- My plans + nav ----------
+function updateNav() { const has = plans().length > 0; document.body.dataset.plans = has ? '1' : '0'; $('#hnav').hidden = !has; }
 function renderPlans() {
   const list = plans(), el = $('#plansList');
-  el.innerHTML = list.length ? `<ul class="plans">${list.map(p => `<li><button class="prow" data-open="${p.id}"><img src="${p.thumb}" alt=""><span><b>${esc(p.name)}</b><span>${new Date(p.created).toLocaleDateString()} · Zone ${esc(p.zone || '?')}${p.cost ? ' · DIY ' + money(p.cost.diy) : ''}</span></span></button><button class="btn btn--ghost btn--sm" data-del="${p.id}" aria-label="Delete ${esc(p.name)}">Delete</button></li>`).join('')}</ul>`
-    : `<section class="empty"><h2>No saved designs yet</h2><p class="muted">Your designs will show up here.</p><button class="btn btn--primary btn--lg" data-go="home">Start a design</button></section>`;
+  el.innerHTML = list.length ? `<ul class="plans">${list.map(p => `<li><button class="prow" type="button" data-open="${p.id}"><img src="${esc(p.thumb)}" alt=""><span><b>${esc(p.name)}</b><span>${new Date(p.created).toLocaleDateString()}${p.place ? ' · ' + esc(p.place) : ''}${p.cost ? ' · about ' + money(p.cost.total ?? p.cost.diy) : ''}</span></span></button><button class="btn btn--ghost btn--sm" type="button" data-del="${p.id}" aria-label="Delete ${esc(p.name)}">Delete</button></li>`).join('')}</ul>`
+    : `<section class="empty"><h2>No saved yards yet</h2><p class="muted">Your designs will show up here.</p><button class="btn btn--primary btn--lg" type="button" data-menu="new">Start a design</button></section>`;
 }
 $('#plansList').onclick = e => {
   const o = e.target.closest('[data-open]'), d = e.target.closest('[data-del]');
-  if (o) { const p = plans().find(x => x.id === o.dataset.open); Object.assign(F, { style: p.style, plants: p.plants, ground: p.ground, saved: true }); if (p.zip && p.zip !== state.zip) { $('#zip').value = p.zip; $('#zipForm').requestSubmit(); } go('home'); step(5); }
-  if (d) { const p = plans().find(x => x.id === d.dataset.del); if (confirm(`Delete "${p.name}"? This can't be undone.`)) { localStorage.setItem(PKEY, JSON.stringify(plans().filter(x => x.id !== p.id))); renderPlans(); toast('Design deleted'); } }
+  if (o) { const p = plans().find(x => x.id === o.dataset.open); Object.assign(F, { style: p.style, stylePicked: true, plants: p.plants, ground: p.ground, tier: p.tier || null, manual: p.manual || null, saved: true, savedId: p.id, reopened: p });
+    if (p.budget) setBudget(p.budget); if (p.mode) F.mode = p.mode; localStorage.setItem('yardplan.style', p.style);
+    if (p.zip && p.zip !== state.zip) { $('#zip').value = p.zip; $('#zipForm').requestSubmit(); } go('home'); step(3); }
+  if (d) { const p = plans().find(x => x.id === d.dataset.del); if (confirm(`Delete "${p.name}"? This can't be undone.`)) { localStorage.setItem(PKEY, JSON.stringify(plans().filter(x => x.id !== p.id))); renderPlans(); updateNav(); toast('Design deleted'); } }
 };
-const _go = window.go; window.addEventListener('click', e => { if (e.target.closest('[data-tab=plans],[data-go=plans]')) renderPlans(); }, true);
-renderPlans();
-window.flowApi = { step, state: F, pickPlants, designFor, renderPlans };
-step(0);
+function newDesign() { Object.assign(F, { style: '', stylePicked: false, plants: [], ground: '', tier: null, manual: null, edits: null, saved: false, savedId: null, reopened: null, plan: null, P: null, render: null }); go('home'); step(1); }
+document.addEventListener('click', e => { const m = e.target.closest('[data-menu]'); if (!m) return; closeSheet('#menuSheet'); if (m.dataset.menu === 'new') newDesign(); if (m.dataset.menu === 'pro') go('pro'); });
+$('#menuBtn').onclick = () => openSheet('#menuSheet');
+window.addEventListener('click', e => { if (e.target.closest('[data-tab=plans],[data-go=plans]')) renderPlans(); }, true);
+window.addEventListener('offline', () => toast("You're offline. You can look around, but new pictures need a connection."));
+renderPlans(); updateNav();
+window.flowApi = { step, state: F, pickPlants, designFor, renderPlans, openAdjust, openInfo, savePlan };
+// Start: prefilled ZIP (95814, CA) is looked up silently so the default path needs no typing; users anywhere can change it.
+if (/^\d{5}$/.test($('#zip').value) && !state.zip) $('#zipForm').requestSubmit();
+step(1);

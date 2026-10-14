@@ -140,7 +140,7 @@ function applyRef() {
   syncInputs(); render(); ovHint(`Camera height set to ${camH.toFixed(1)} ft from your ${H} ft reference.`);
 }
 function applyScale() { const { a, b } = st.scaleLine; const px = Math.hypot((a.x - b.x) * st.natW, (a.y - b.y) * st.natH); if (px < 5) return; st.ftPerPx = (+$('#scaleL').value || 20) / px; st.scaleSet = true; syncInputs(); render(); ovHint(`Scale set: ${(+$('#scaleL').value)} ft = ${Math.round(px)} px.`); }
-const widthFt = it => (PLANT3D[it.id]?.w || 3) * it.s;
+const widthFt = it => (PLANT_SIZE[it.id]?.w || 3) * it.s;
 function drawGuides() {
   const g = $('#ovGuide'), x = g.getContext('2d'); x.clearRect(0, 0, g.width, g.height); if (!st.natW) return;
   const W = g.width, H = g.height, d = devicePixelRatio; x.lineWidth = 2 * d; x.font = `600 ${12 * d}px Inter, system-ui, sans-serif`;
@@ -208,7 +208,7 @@ async function loadFile(f) { $('#ownPhoto').checked = true; $('#ownPhoto').oncha
 async function autoPlace(ids) {
   if (!st.natW) return 0; items.length = 0; selected = null;
   const top = st.view === 'top', rows = [[.68], [.8], [.9]];
-  const sorted = [...ids].sort((a, b) => (PLANT3D[b]?.h || 0) - (PLANT3D[a]?.h || 0)), per = Math.ceil(sorted.length / 3); let n = 0;
+  const sorted = [...ids].sort((a, b) => (PLANT_SIZE[b]?.h || 0) - (PLANT_SIZE[a]?.h || 0)), per = Math.ceil(sorted.length / 3); let n = 0;
   sorted.forEach((id, i) => { const row = Math.min(2, Math.floor(i / per)), inRow = sorted.filter((_, j) => Math.min(2, Math.floor(j / per)) === row), fx = (inRow.indexOf(id) + 1) / (inRow.length + 1);
     const g = groundAt(top ? { x: .15 + row * .35, y: .2 + fx * .6 } : { x: .08 + fx * .84, y: rows[row][0] }); if (g) { items.push({ id, x: g.x, z: g.z, s: 1, rot: 0 }); n++; } });
   select(null); return n;

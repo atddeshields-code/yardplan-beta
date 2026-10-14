@@ -5,7 +5,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 // ---- navigation ----
 function setMode(m){document.body.dataset.mode=m;const b=$('#modeBtn');b.hidden=m!=='pro';b.setAttribute('aria-pressed',m==='pro');try{localStorage.setItem('yardplan.mode',m)}catch(e){}}
 setMode(localStorage.getItem('yardplan.mode')==='pro'?'pro':'home');
-$('#modeBtn').onclick=()=>{setMode('home');go('home');};$('#proEntry').onclick=()=>go('pro');
+$('#modeBtn').onclick=()=>{setMode('home');go('home');};$('#proEntry').onclick=()=>go('pro');{const p1=$('#proEntry1');if(p1)p1.onclick=()=>go('pro');}
 function go(tab){if(tab==='pro')setMode('pro');$$('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
  $$('#nav button').forEach(b=>b.toggleAttribute('aria-current',b.dataset.tab===tab));$$('.tab').forEach(t=>t.classList.toggle('active',t.id==='tab-'+tab));document.body.dataset.tab=tab;window.scrollTo({top:0,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
  if(tab==='styles')closeStyle();if(tab==='overlay'&&window.onOverlayShow)window.onOverlayShow();if(tab==='site'&&window.onSiteShow)window.onSiteShow();if(tab==='pro'&&window.onProShow)window.onProShow();if(tab==='care'&&window.onCareShow)window.onCareShow();window.dispatchEvent(new CustomEvent('yardplan:tab',{detail:tab}));}
@@ -19,13 +19,18 @@ async function lookupZone(zip){
   return {zone:j.zone,src:`USDA 2023 map via phzmapi.org · avg. winter low ${j.temperature_range}°F`};}
  catch(e){try{const Z=(await import('./guides/data/usda-zones.js')).default;if(Z[zip])return{zone:Z[zip],src:'USDA 2023 map (offline copy, PRISM/OSU)'};}catch(_){}if(ZIP_FALLBACK[zip])return{zone:ZIP_FALLBACK[zip],src:'Offline sample data (approximate)'};return null;}}
 const zr=$('#zoneResult');
-$('#zipForm').onsubmit=async e=>{e.preventDefault();const zip=$('#zip').value.trim();zr.hidden=false;
- if(!/^\d{5}$/.test(zip)){zr.innerHTML='Please enter a 5-digit US ZIP code.';return;}
- state.zip=zip;zr.innerHTML='Looking up your zone…';const r=await lookupZone(zip);
- if(r)setZone(r.zone,r.src);else zr.innerHTML=`We couldn't find ZIP ${esc(zip)}. Pick your zone manually below.`;renderMaterials();};
+// v15: ZIP -> "City, ST" (zippopotam.us, no key), falling back to the offline Census county file.
+async function lookupPlace(zip){
+ try{const r=await fetch(`https://api.zippopotam.us/us/${zip}`);if(r.ok){const j=await r.json(),pl=j.places&&j.places[0];if(pl)return{city:pl['place name'],st:pl['state abbreviation']};}}catch(e){}
+ try{const m=await import('./guides/data/zip-county.js'),c=m.COUNTIES[m.ZIP_COUNTY[zip]];if(c)return{city:c[1],st:c[0]};}catch(e){}return null;}
+let zipSeq=0;
+$('#zipForm').onsubmit=async e=>{e.preventDefault();const zip=$('#zip').value.trim(),my=++zipSeq;zr.hidden=false;
+ if(!/^\d{5}$/.test(zip)){zr.innerHTML='Enter a 5-digit ZIP code.';return;}
+ state.zip=zip;state.place=null;state.zone=null;zr.innerHTML='Looking up your area…';window.dispatchEvent(new Event('yardplan:zone'));const [r,pl]=await Promise.all([lookupZone(zip),lookupPlace(zip)]);if(my!==zipSeq)return;state.place=pl;
+ const man=$('#zoneManual');if(r){if(man)man.hidden=true;setZone(r.zone,r.src);}else{zr.innerHTML=`We couldn't find that ZIP. Check it, or pick your zone instead.`;if(man)man.hidden=false;}renderMaterials();};
 function setZone(z,src){state.zone=parseInt(z,10);state.zoneLabel=z;$('#zoneSel').value=z;
  const n=PLANTS.filter(fits).length;zr.hidden=false;
- zr.innerHTML=`<b>${state.zip?'ZIP '+state.zip+' · ':''}Zone ${z}</b> · ${n} plants do well here<small>${esc(src)}</small>`;
+ const pl=state.place;if(document.body.dataset.mode!=='pro'&&pl){zr.innerHTML=`<b>✓ ${esc(pl.city)}, ${esc(pl.st)}</b><small>${n} plants grow well here</small>`;}else zr.innerHTML=`<b>${pl?esc(pl.city)+', '+esc(pl.st)+' · ':state.zip?'ZIP '+state.zip+' · ':''}Zone ${z}</b> · ${n} plants do well here<small>${esc(src)}</small>`;
  $('#zonePill').textContent='Zone '+z;$('#moreZone').textContent=(state.zip?'ZIP '+state.zip+' · ':'')+'Zone '+z;window.dispatchEvent(new Event('yardplan:zone'));renderPlants();renderStyles();renderPalette();}
 const fits=p=>!state.zone||(state.zone>=p.zmin&&state.zone<=p.zmax);
 const sunTxt={full:'Full sun',part:'Part shade',shade:'Shade'},waterTxt={low:'Low water',med:'Med water',high:'High water'};

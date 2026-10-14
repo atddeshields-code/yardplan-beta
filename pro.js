@@ -1,6 +1,6 @@
 // Pro / Contractor panel: takeoff, price book, bid (Good/Better/Best), compliance flags and proposal PDF.
 // Classic-script globals used here (declared with const/let at top level, so reachable by name from this
-// module, which runs after them): PLANTS, PLANT3D (data.js), MATERIALS, priceProvider (prices.js), state, esc, go (app.js).
+// module, which runs after them): PLANTS, PLANT_SIZE (data.js), MATERIALS, priceProvider (prices.js), state, esc, go (app.js).
 import { takeoff, toCSV } from './contractor/takeoff.js';
 import { createPriceBook, seedFromProvider, setItem, setPlantPrice, setSettings, loadFromStorage, saveToStorage } from './contractor/pricebook.js';
 import { generateBid, marginPctToMarkupPct } from './contractor/bid.js';
@@ -11,7 +11,7 @@ import { buildProposalPdf } from './contractor/proposal-pdf.js';
 import { buildTakeoff, priceProject, roundLines } from './contractor/budget-fit.js';
 
 const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
-const PKEY = 'yardplan.pro.profile.v1', DKEY = 'yardplan.design3d.v2';
+const PKEY = 'yardplan.pro.profile.v1', DKEY = 'yardplan.design.v3';
 const money = n => '$' + Math.round(+n || 0).toLocaleString('en-US');   // whole dollars
 const rate = n => '$' + (+n || 0).toLocaleString('en-US', { minimumFractionDigits: (+n % 1) ? 2 : 0, maximumFractionDigits: 2 });   // unit prices keep cents
 let profile = {}; try { profile = JSON.parse(localStorage.getItem(PKEY)) || {}; } catch (e) { }
@@ -48,11 +48,11 @@ async function refresh() {
 }
 function recompute() {
   if (!design) return;
-  take = buildTakeoff(design, { catalog: { plants: PLANTS, plant3d: PLANT3D }, includeLawn: $('#proLawn').checked });
+  take = buildTakeoff(design, { catalog: { plants: PLANTS, plant3d: PLANT_SIZE }, includeLawn: $('#proLawn').checked });
   if (irr) { const have = new Set(take.lines.map(l => l.key)); take.lines.push(...irr.lines.filter(l => !have.has(l.key) && book.items[l.key]).map(l => ({ ...l, name: book.items[l.key].name, basis: 'count', waste: 0, irrigation: true }))); }
   bid = generateBid(take, book, { tiers: true, autoFees: book.settings.autoFees !== false });
   // headline = the single pricing path (same as proBid().rounded.total and the homeowner "hire a pro" total)
-  priced = priceProject({ takeoff: take, book, catalog: { plants: PLANTS, plant3d: PLANT3D } });
+  priced = priceProject({ takeoff: take, book, catalog: { plants: PLANTS, plant3d: PLANT_SIZE } });
   // number walls 1..n instead of raw item indexes in the messages
   const wallNo = {}; design.items.forEach((it, i) => { if (it.kind === 'wall') wallNo[i] = Object.keys(wallNo).length + 1; });
   warnings = checkCompliance(design).map(w => w.itemIndex != null ? { ...w, message: w.message.replace('#' + w.itemIndex, '#' + wallNo[w.itemIndex]) } : w);

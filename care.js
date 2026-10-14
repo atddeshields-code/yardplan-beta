@@ -1,6 +1,6 @@
 // Care guide tab: irrigation plan + maintenance calendar from /guides (yardplan-guides). Everything here is lazy:
 // guide-ui.js -> location.js pulls data/zcta.js (0.8 MB) and data/climate-stations.js (1.8 MB) only when the tab opens.
-// Classic globals used: state (app.js: zip, zoneLabel), PLANTS/PLANT3D (data.js), ZIP_FALLBACK (if present), go.
+// Classic globals used: state (app.js: zip, zoneLabel), PLANTS/PLANT_SIZE (data.js), ZIP_FALLBACK (if present), go.
 const $ = s => document.querySelector(s);
 let modsP = null, jsPdfP = null, guide = null, lastKey = '', overlayOn = false;
 const loadMods = () => modsP || (modsP = Promise.all([import('./guides/guide-ui.js'), import('./guides/location.js'), import('./guides/catalog.js')]).catch(e => { modsP = null; throw e; }));
@@ -12,7 +12,7 @@ async function show(force) {
   ensureCss();
   const api = window.planApi; let design = null, manifold = null;
   if (api?.ready?.()) { design = api.serialize(); manifold = api.manifold(); }
-  else { try { design = JSON.parse(localStorage.getItem('yardplan.design3d.v2')); } catch {} if (design) { const w = design.yard.w, d = design.yard.d; design.house = design.house || { x: -w / 2 - 7.2, z: -2, side: 'left', isDefault: true }; manifold = { x: -w / 2 + 1.5, z: Math.max(-d / 2 + 1.5, Math.min(d / 2 - 1.5, design.house.z)) }; } }
+  else { try { design = JSON.parse(localStorage.getItem('yardplan.design.v3')); } catch {} if (design) { const w = design.yard.w, d = design.yard.d; design.house = design.house || { x: -w / 2 - 7.2, z: -2, side: 'left', isDefault: true }; manifold = { x: -w / 2 + 1.5, z: Math.max(-d / 2 + 1.5, Math.min(d / 2 - 1.5, design.house.z)) }; } }
   const zip = (state.zip || '95814').trim(); // default: Sacramento, CA until the user sets a ZIP
   $('#careZip').value = zip;
   if (!design || !design.items.some(i => i.kind === 'plant' || ['lawn', 'mulch', 'gravel', 'dg', 'path'].includes(i.kind))) return msg('<b>Pick a design first</b>Pick a style in <a href="#" data-go="home">Design</a>, or add beds and plants in the <a href="#" data-go="site">Site plan</a>. The irrigation plan and care calendar are built from that design.');
@@ -26,7 +26,7 @@ async function show(force) {
   if (!location) return msg(`<b>ZIP ${esc(zip)} isn't in our offline ZIP table</b>Try a nearby ZIP.`);
   const el = document.createElement('div'); $('#careOut').replaceChildren(el);
   try {
-    guide = ui.renderGuide(el, { design, zip, location, catalog: cat.catalogFromGlobals({ PLANTS, PLANT3D }), manifold, jsPDF: window.jspdf?.jsPDF,
+    guide = ui.renderGuide(el, { design, zip, location, catalog: cat.catalogFromGlobals({ PLANTS, PLANT_SIZE }), manifold, jsPDF: window.jspdf?.jsPDF,
       waterSource: $('#careSrc').value, pressurePsi: +$('#carePsi').value || undefined, flowGpm: +$('#careGpm').value || undefined, tab: $('#careOut').dataset.tab || 'irrigation' });
   } catch (e) { console.warn(e); return msg('<b>Could not build the guide</b>' + esc(e.message)); }
   if (!window.jspdf) el.querySelector('[data-act=pdf]').disabled = true;

@@ -4,7 +4,7 @@
 export function catalogFromGlobals(g = globalThis) {
   // data.js declares top-level `const` (global lexical scope, not window props) — read them via indirect eval.
   const get = n => { try { return (0, eval)(n); } catch (e) { return g[n]; } };
-  return { plants: get('PLANTS'), plant3d: get('PLANT3D'), zipFallback: get('ZIP_FALLBACK'), materials: get('MATERIALS') };
+  return { plants: get('PLANTS'), plant3d: get('PLANT_SIZE'), zipFallback: get('ZIP_FALLBACK'), materials: get('MATERIALS') };
 }
 /** Normalize: { plants: [...] , plant3d } -> Map id -> plant with numeric heightFt/spreadFt */
 export function plantIndex(catalog) {

@@ -3,6 +3,6 @@ import fs from 'node:fs'; import vm from 'node:vm'; import path from 'node:path'
 export const DEFAULT_DATA_JS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data.js');
 export function loadAppCatalog(file = DEFAULT_DATA_JS) {
   const ctx = vm.createContext({}); vm.runInContext(fs.readFileSync(file, 'utf8') +
-    '\n;this.__c={plants:PLANTS,plant3d:typeof PLANT3D!=="undefined"?PLANT3D:{},zipFallback:typeof ZIP_FALLBACK!=="undefined"?ZIP_FALLBACK:{},materials:typeof MATERIALS!=="undefined"?MATERIALS:null};', ctx);
+    '\n;this.__c={plants:PLANTS,plant3d:typeof PLANT_SIZE!=="undefined"?PLANT_SIZE:{},zipFallback:typeof ZIP_FALLBACK!=="undefined"?ZIP_FALLBACK:{},materials:typeof MATERIALS!=="undefined"?MATERIALS:null};', ctx);
   return JSON.parse(JSON.stringify(ctx.__c));
 }
