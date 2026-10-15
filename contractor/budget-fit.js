@@ -9,6 +9,7 @@
 //  Overhead/markup are NOT double counted, and both use the same contractor price book (no retail-vs-wholesale split).
 //  Fix: priceProject() below is the only place a pro price is computed; homeownerEstimate() and proBid() both call it with the
 //  same includeLawn flag and no tier multiplier, so they are identical by construction.
+import { irrigationPlan, irrigationLines, irrigationMode } from './irrigation-takeoff.js';
 import { takeoff as runTakeoff } from './takeoff.js';
 import { generateBid } from './bid.js';
 import { REBATE_RULES } from './data/rebates.js';
@@ -36,13 +37,15 @@ const markupPct = (s, bucket) => { const m = s.markups; if (!m) return +s.markup
 /** buildTakeoff(design, { catalog, includeLawn=false }) — takeoff.js, but plants may carry a per-item `container` (budget-fit
  *  downsizing) so two plants of one species in different sizes are priced separately. */
 export function buildTakeoff(design, { catalog, includeLawn = false } = {}) {
-  const items = design.items || [], plants = items.filter(i => i.kind === 'plant'), rest = items.filter(i => i.kind !== 'plant');
+  const items = design.items || [], plants = items.filter(i => i.kind === 'plant'), rest = items.filter(i => i.kind !== 'plant' && !i.existing); // existing site surfaces (auto plan / survey) aren't new work
   const base = runTakeoff({ ...design, items: [...rest, ...plants.filter(p => !p.container)] }, { catalog, includeLawn, containerSizes: design.containerSizes });
   const groups = new Map(); for (const p of plants.filter(p => p.container)) { const k = p.id + '|' + p.container; (groups.get(k) || groups.set(k, []).get(k)).push(p); }
   for (const [k, ps] of groups) { const [id, c] = k.split('|');
     for (const row of runTakeoff({ items: ps }, { catalog, containerSizes: { [id]: c } }).plants) base.plants.push({ ...row, id: row.id + '@' + c, key: 'plant:' + row.id + '@' + c, speciesId: row.id }); }
   // book.plants lookups use p.id first: keep the container lookup working for the suffixed ids
   base.totals.plantCount = base.plants.reduce((s, p) => s + p.count, 0);
+  // irrigation (design.irrigation = 'drip' | 'spray'): parts from the guides generator, same lines for homeowner and pro
+  if (irrigationMode(design) !== 'none') { try { const plan = irrigationPlan(design, { catalog }); base.lines.push(...irrigationLines(plan)); base.irrigation = plan; } catch (e) { base.irrigationError = e.message; } }
   return base;
 }
 

@@ -1,3 +1,4 @@
+import { designOnSite } from './siteplan/core.js';
 // Homeowner flow (v15, per yardplan-research/simplify-v15.md): 3 steps, one primary action per screen.
 // 1 Your yard (photo + ZIP) → 2 Pick a look (style + budget) → 3 Your new yard (render, price, rows → sheets).
 // Pro tools (site plan, photo calibration, materials, measurements, water pressure, MWELO) live in contractor mode only.
@@ -5,7 +6,7 @@
 const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
 const HAS_RENDER = !!window.YARDPLAN_RENDER_URL;
 const SAMPLE_RENDER = 'render/assets/sample-real-render.jpg';
-const F = { step: 1, photo: false, sample: false, style: '', stylePicked: false, plants: [], ground: '', plan: null, mode: localStorage.getItem('yardplan.mode.who') || 'diy', saved: false, savedId: null,
+const F = { irrigation: ['drip','spray'].includes(localStorage.getItem('yardplan.irrigation')) ? localStorage.getItem('yardplan.irrigation') : 'none', step: 1, photo: false, sample: false, style: '', stylePicked: false, plants: [], ground: '', plan: null, mode: localStorage.getItem('yardplan.mode.who') || 'diy', saved: false, savedId: null,
   budget: +localStorage.getItem('yardplan.budget') || 10000, tier: null, manual: null, edits: null, utility: localStorage.getItem('yardplan.utility') || '', turfSf: +localStorage.getItem('yardplan.turfSf') || 0,
   render: null, reopened: null };
 const flow = $('#flow'), next = $('#fNext'), back = $('#fBack');
@@ -17,6 +18,7 @@ const styleName = id => NAME[id || F.style] || (STYLES.find(s => s.id === (id ||
 const SHORT = { modern: 'Clean lines, grasses, gravel', cottage: 'Soft, colorful, full of flowers', xeriscape: 'Big texture, little water', woodland: 'Shady, layered, natural', japanese: 'Calm, mossy, stone and maple', prairie: 'Native grasses and wildflowers', mediterranean: 'Silvery, fragrant, sun-loving', formal: 'Clipped hedges and symmetry', tropical: 'Big leaves, bold color' };
 const place = () => state.place ? `${state.place.city}, ${state.place.st}` : '';
 const near = () => state.place ? `near ${state.place.city}` : 'where you live';
+window.toast = (...a) => toast(...a);
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, 4000); }
 // ---------- ZIP → state (offline, Census ZIP3 majority state) ----------
 let Z3 = null; import('./marketplace/data/zip3-state.js').then(m => { Z3 = m.zip3ToState; if (F.step === 2) renderStyles(); }).catch(e => console.warn(e));
@@ -86,7 +88,7 @@ $('#fAddrGo').onclick = async () => {
   const q = $('#fAddr').value.trim(); if (q.length < 5) return; const m = $('#fAddrMsg'); m.textContent = 'Finding your yard from above… up to a minute';
   try { const g = await window.overlayApi.geocode(q); const zip = (/(\d{5})(?:-\d{4})?\s*$/.exec(g.label || '') || [])[1];
     if (zip && zip !== state.zip) { $('#zip').value = zip; $('#zipForm').requestSubmit(); }
-    await window.overlayApi.loadNaip(q); setPhoto(window.overlayApi.imageUrl()); F.sample = false; F.placed = false; m.textContent = `Using an aerial view of ${g.label.split(',')[0]}.`; update();
+    await window.overlayApi.loadNaip(q); setPhoto(window.overlayApi.imageUrl()); F.sample = false; F.placed = false; m.textContent = `Using an aerial view of ${g.label.split(',')[0]}.`; F.addr = { q, lat: g.lat, lon: g.lon, label: g.label }; $('#fSiteRow').hidden = false; update();
   } catch (err) { m.textContent = "We couldn't find that address. Try adding the city and state."; }
 };
 $('#lSample').onclick = async () => {
@@ -177,7 +179,8 @@ function buildDesign(force) {
   if (!F.plants.length || force) F.plants = pickPlants(F.style); if (!F.ground) F.ground = defaultGround(F.style);
   F.base = designFor(F.style, F.plants, F.ground); F.edits = F.manual || null;
   if (!F.manual && F.tier && BF) { try { const r = F.tier === 'better' ? BF.fitBudget(fitReq(F.base)) : BF.fitTiers(fitReq(F.base))[F.tier]; F.edits = editsOf(r); } catch (e) { console.warn(e); } }
-  F.design = applyEdits(F.base, F.edits); try { localStorage.setItem('yardplan.design.v3', JSON.stringify(F.design)); } catch (e) {};
+  if (F.site) { try { F.base = designOnSite(F.site, F.base); } catch (e) { console.warn(e); } }
+  F.base.irrigation = F.irrigation; F.design = applyEdits(F.base, F.edits); F.design.irrigation = F.irrigation; try { localStorage.setItem('yardplan.design.v3', JSON.stringify(F.design)); } catch (e) {};
   if (window.planApi?.ready?.()) window.planApi.apply(F.design); window.dispatchEvent(new Event('yardplan:design'));
   F.placed = false; F.plan = null; F.P = null; F.saved = false;
 }
@@ -185,6 +188,14 @@ async function placeOnPhoto() {
   const o = window.overlayApi; if (!o?.hasPhoto?.() || F.placed) return; const ids = []; F.plants.forEach(id => { ids.push(id); if (PLANTS.find(p => p.id === id)?.type !== 'tree') ids.push(id); });
   await o.autoPlace(ids.slice(0, 10)); F.placed = true;
 }
+// ---------- v17: optional site plan from above / survey ----------
+function openSiteHome(mode) { const a = F.addr || { q: $('#fAddr').value.trim() };
+  window.siteApi.open({ mode: F.site && mode === 'aerial' ? 'edit' : mode, site: F.site && mode !== 'aerial' ? F.site : (mode === 'edit' ? F.site : null), address: a.label || a.q, lat: a.lat, lon: a.lon, who: 'home', layers: F.siteLayers || {}, keepAerial: true,
+    onDone: (site, d, layers) => { F.site = site; F.siteLayers = layers; try { localStorage.setItem('yardplan.site.v1', JSON.stringify(site)); } catch {}
+      const A = Math.round(Math.abs(site.lot.reduce((s2, p, i) => { const q = site.lot[(i + 1) % site.lot.length]; return s2 + p[0] * q[1] - q[0] * p[1]; }, 0) / 2));
+      $('#fSiteNote').textContent = `${site.source === 'survey' ? 'From your survey' : 'Drawn from above (approximate)'} · lot about ${A.toLocaleString()} sq ft. Your design will fit this yard.`; $('#fSiteGo').textContent = 'Edit my yard from above';
+      F.manual = null; F.saved = false; if (F.step === 3) renderResult(); toast('Got it — your plan now uses your real yard.'); } }); }
+$('#fSiteGo').onclick = () => openSiteHome(F.site ? 'edit' : 'aerial'); $('#fSurveyGo').onclick = () => openSiteHome('survey');
 // ---------- 3 Your new yard ----------
 const GROUNDS = [['lawn', 'Lawn'], ['gravel', 'Gravel'], ['dg', 'Crushed rock path'], ['mulch', 'Mulch']];
 const groundName = k => GROUNDS.find(g => g[0] === k)?.[1] || k;
@@ -203,7 +214,8 @@ async function renderResult() {
    <div class="list rows" id="rRows">
     <button class="row" type="button" data-info="in"><b>What's in it</b><span id="rInS">Plants and ground</span></button>
     <button class="row" type="button" data-info="budget"><b>Budget and rebates</b><span id="rBudS">Your total, ways to save, rebates</span></button>
-    <button class="row" type="button" data-info="care"><b>Care and watering</b><span>Water use, yard care, this month</span></button>
+    <button class="row" type="button" data-info="irr"><b>Watering and irrigation</b><span id="rIrrS">${F.irrigation === 'none' ? 'Add irrigation · optional' : (F.irrigation === 'drip' ? 'Drip' : 'Sprinklers') + ' · included in your price'}</span></button>
+    <button class="row" type="button" data-info="care"><b>Yard care</b><span>Water use, yard care, this month</span></button>
     <button class="row" type="button" data-info="quotes"><b>Get quotes from local pros</b><span>Licensed landscapers near you</span></button></div>
    <p class="footnote legal">For planning only, not for construction. Call 811 before you dig.</p></div></div>`;
   $('#rAdjust').onclick = openAdjust; $('#rAnother').onclick = () => step(2);
@@ -251,17 +263,18 @@ function renderFailed(code) {
   F.render = { state: 'failed', code }; const media = $('#rMedia'); if (!media) return;
   const photoUrl = window.overlayApi?.imageUrl?.() || '';
   $('#rH').textContent = "We couldn't draw your yard this time";
-  media.innerHTML = `<figure class="ba photo"><img class="ba__before" src="${photoUrl}" alt="Your yard today"><span class="ai-label">${esc(styleName())} look</span></figure>
-   <div class="render-fail" role="status"><p>Your design and price are still here. Try again in a minute.</p><button type="button" class="linkbtn" id="rSaveAnyway">Save my plan anyway</button></div>`;
+  document.body.dataset.rfail = '1';
+  media.innerHTML = `<div class="render-fail" role="status"><p>Your design and price are still here. Try again in a minute.</p><button type="button" class="linkbtn" id="rSaveAnyway">Save my plan anyway</button></div>
+   <figure class="ba photo"><img class="ba__before" src="${photoUrl}" alt="Your yard today"><span class="ai-label">${esc(styleName())} look</span></figure>`;
   $('#rSaveAnyway').onclick = () => savePlan(); update();
 }
 function showBA(before, after, sample) {
-  const media = $('#rMedia'); if (!media) return;
+  const media = $('#rMedia'); if (!media) return; delete document.body.dataset.rfail; F.demoNote = !!(sample && !F.sample);
   media.innerHTML = `<figure class="ba photo" id="rBA" style="--pos:50%"><img class="ba__before" src="${esc(before)}" alt="Your yard today"><div class="ba__after"><img src="${esc(after)}" alt="${sample ? 'Sample AI picture of a redesigned yard (not your yard)' : `AI picture of your yard as a ${esc(styleName())} garden`}"></div>
     <span class="ba__tag ba__tag--l">Before</span><span class="ba__tag ba__tag--r">${sample ? 'Sample' : 'After'}</span><span class="ai-label">AI concept · not to scale</span>
     <div class="ba__handle" role="slider" tabindex="0" aria-label="Before and after comparison" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div>
     ${sample ? `<span class="sample-banner sample-banner--demo">${F.sample ? 'Sample yard and sample picture' : 'Sample picture · not your yard'}</span>` : F.sample ? '<span class="sample-banner">Sample yard: this isn\'t your home.</span>' : ''}</figure>
-   ${sample && !F.sample ? '<p class="sample-note" id="rSampleNote"><b>Demo mode.</b> Pictures of your own yard aren\'t switched on in this preview, so the "after" side is a sample picture of a different yard. Your plants, price and plan below are for your yard.</p>' : ''}`;
+`;
   slider($('#rBA'));
 }
 async function cost() {
@@ -270,7 +283,7 @@ async function cost() {
   const el = $('#rPrice'); if (el) { const over = total > B; el.className = 'price-line ' + (over ? 'is-over' : 'is-fit');
     el.innerHTML = over ? `About ${money(total)} · ${money(total - B)} over your ${money(B)} budget <button type="button" class="linkbtn" id="rFit">Make it fit</button>` : `About ${money(total)} · fits your ${money(B)} budget`;
     const f = $('#rFit'); if (f) f.onclick = makeFit;
-    const rb = $('#rReb'), amt = P.rebate?.amount || 0; rb.hidden = !(amt > 0); if (amt > 0) rb.textContent = `Up to ${money(amt)} back in local rebates`;
+    const rb = $('#rReb'), amt = P.rebate?.amount || 0; rb.hidden = !(amt > 0); if (amt > 0) rb.textContent = amt >= total ? 'Rebates may cover most of this' : `Up to ${money(amt)} back in local rebates`;
     const n = P.t.plants.reduce((a, p) => a + p.count, 0); $('#rInS').textContent = `${n} plants · ${groundName(F.ground)}`;
     $('#rBudS').textContent = `${F.mode === 'diy' ? 'Doing it yourself' : 'Hiring a pro'} · ${money(total)}${amt > 0 ? ` · up to ${money(amt)} back` : ''}`; }
   update(); return P;
@@ -287,7 +300,7 @@ async function small(u, max = 360) { if (!u) return null; try { const im = new I
 async function savePlan() {
   try { const list = plans().filter(p => p.id !== F.savedId), now = new Date(), id = F.savedId || now.getTime().toString(36);
     const photo = hasPhoto() ? await small(window.overlayApi.imageUrl(), 240) : null, rend = F.render?.state === 'done' ? await small(F.render.url, 480) : null;
-    list.unshift({ id, name: `${styleName()} yard`, style: F.style, plants: F.plants, ground: F.ground, tier: F.tier, manual: F.manual, budget: F.budget, mode: F.mode, zip: state.zip, zone: state.zoneLabel, place: place(), cost: F.plan,
+    list.unshift({ id, name: `${styleName()} yard`, style: F.style, plants: F.plants, ground: F.ground, tier: F.tier, manual: F.manual, irrigation: F.irrigation, budget: F.budget, mode: F.mode, zip: state.zip, zone: state.zoneLabel, place: place(), cost: F.plan,
       thumb: rend || photo || `img/styles/${F.style}-800.webp`, render: rend, sampleRender: F.render?.state === 'sample', created: now.toISOString() });
     localStorage.setItem(PKEY, JSON.stringify(list.slice(0, 20))); F.saved = true; F.savedId = id; update(); updateNav(); renderPlans(); toast('Saved to My plans on this device.'); }
   catch (e) { console.warn(e); toast("We couldn't save right now. Your design is still here. Try again."); }
@@ -307,10 +320,10 @@ $$('dialog.sheet').forEach(d => { d.addEventListener('click', e => { if (e.targe
 // Detail sheets from the result rows
 async function openInfo(kind) {
   if (kind === 'quotes') return window.mpApi?.getQuotes({ bid: F.bid, takeoff: F.takeoff, zip: state.zip, style: styleName(), photo: hasPhoto() ? window.overlayApi.imageUrl() : null, render: F.render?.state === 'done' ? F.render.url : null });
-  const d = $('#infoSheet'); d.dataset.kind = kind; $('#infoBody').innerHTML = '';
-  $('#infoT').textContent = { in: "What's in it", budget: 'Budget and rebates', care: 'Care and watering' }[kind];
+  const d = $('#infoSheet'); d.dataset.kind = kind; $('#infoBody').innerHTML = ''; $('#inDl')?.remove();
+  $('#infoT').textContent = { in: "What's in it", budget: 'Budget and rebates', care: 'Yard care', irr: 'Watering and irrigation' }[kind];
   openSheet('#infoSheet');
-  if (kind === 'in') renderInSheet(); if (kind === 'budget') renderBudgetSheet(); if (kind === 'care') renderCareSheet();
+  if (kind === 'in') renderInSheet(); if (kind === 'budget') renderBudgetSheet(); if (kind === 'care') renderCareSheet(); if (kind === 'irr') renderIrrSheet();
 }
 function plantRows() { const c = {}; (F.design?.items || []).filter(i => i.kind === 'plant').forEach(i => c[i.id] = (c[i.id] || 0) + 1);
   return Object.entries(c).map(([id, n]) => ({ p: PLANTS.find(q => q.id === id), n })).filter(r => r.p); }
@@ -318,8 +331,9 @@ function renderInSheet() {
   const rows = plantRows();
   $('#infoBody').innerHTML = `<ul class="plist">${rows.map(({ p, n }) => `<li><img src="img/plants/${p.id}.jpg" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><div><b>${esc(p.name)}${n > 1 ? ` <span class="muted">× ${n}</span>` : ''}</b><span>${sunOf(p)} · ${waterOf(p)} · ${Math.round(PLANT_SIZE[p.id]?.w || 3)} ft wide</span></div></li>`).join('')}</ul>
    <p class="footnote"><b>Ground:</b> ${esc(groundName(F.ground))} in the middle · mulched beds · ${F.design.items.some(i => i.kind === 'path') ? 'paver path' : 'crushed rock path'}</p>
-   <button class="btn btn--secondary btn--block" type="button" id="inDl">Download plant list</button>
+   ${F.demoNote ? '<p class="footnote" id="rSampleNote"><b>Demo mode.</b> Pictures of your own yard aren\'t switched on in this preview, so the "after" side is a sample picture of a different yard. Your plants, price and plan are for your yard.</p>' : ''}
    <p class="footnote legal">For planning only, not for construction. Call 811 before you dig.</p>`;
+  $('#infoFoot').insertAdjacentHTML('afterbegin', '<button class="btn btn--secondary btn--lg" type="button" id="inDl">Download plant list</button>');
   $('#inDl').onclick = () => { const csv = 'Plant,Botanical name,Count,Sun,Water,Width (ft)\n' + rows.map(({ p, n }) => [p.name, p.sci, n, sunOf(p), waterOf(p), Math.round(PLANT_SIZE[p.id]?.w || 3)].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `yardplan-${F.style}-plants.csv`; document.body.append(a); a.click(); a.remove(); };
 }
@@ -403,6 +417,51 @@ async function renderCareSheet() {
     const pdf = document.querySelector('#careOut [data-act=pdf]'); $('#cPdf').disabled = !pdf || pdf.disabled; $('#cPdf').onclick = () => pdf?.click();
   } catch (e) { console.warn(e); if (el.isConnected) el.innerHTML = '<p class="footnote">Add your ZIP to see watering and care for your area.</p>'; }
 }
+// ---------- Watering and irrigation (optional add-on for homeowners) ----------
+const IRRN = { none: 'No irrigation', drip: 'Drip', spray: 'Sprinklers' };
+function irrCost(P) { const f = ls => (ls || []).filter(l => String(l.key).startsWith('irr-')).reduce((a, l) => a + l.amount, 0); return { pro: f(P?.est?.pro?.lines), diy: f(P?.est?.diy?.lines) }; }
+async function setIrrigation(m, from) {
+  F.irrigation = m; localStorage.setItem('yardplan.irrigation', m); if (F.design) { F.base.irrigation = m; F.design.irrigation = m; if (window.planApi?.ready?.()) window.planApi.apply(F.design); }
+  const s = $('#rIrrS'); if (s) s.textContent = m === 'none' ? 'Add irrigation · optional' : IRRN[m] + ' · included in your price';
+  F.saved = false; const P = await cost(); toast(m === 'none' ? `Irrigation removed. About ${money(totalFor(P))}.` : `${IRRN[m]} irrigation added. About ${money(totalFor(P))}.`);
+  if (from === 'sheet' && $('#infoSheet').dataset.kind === 'irr') renderIrrSheet(); if (from === 'adj') renderAdjust();
+}
+const segIrr = (id) => `<div class="seg3" role="radiogroup" aria-label="Irrigation" id="${id}">${['none', 'drip', 'spray'].map(k => `<button type="button" role="radio" aria-checked="${F.irrigation === k}" data-irr="${k}">${k === 'none' ? 'None' : k === 'drip' ? 'Drip' : 'Sprinklers'}</button>`).join('')}</div>`;
+async function renderIrrSheet() {
+  const el = $('#infoBody'), m = F.irrigation, P = F.P || await cost(), c = irrCost(P), who = F.mode === 'diy' ? c.diy : c.pro;
+  const tut = await import('./guides/irrigation-tutorials.js');
+  el.innerHTML = `<section class="irr">${segIrr('irrSeg')}
+   ${m === 'none' ? `<div class="irr__add"><p><b>Irrigation is optional.</b> Your price doesn't include it. Most yards in dry areas do better with drip: it waters the roots, uses less water and is easy to install yourself.</p>
+      <button class="btn btn--primary btn--block" type="button" id="irrAdd">Add drip irrigation</button></div>`
+   : `<p class="irr__price"><b>${IRRN[m]}</b> · about <b>${money(who)}</b> ${F.mode === 'diy' ? 'in parts (doing it yourself)' : 'installed'}, included in your ${money(totalFor(P))} total.</p>
+      <p class="footnote">Recommended: drip for beds and trees, ${F.ground === 'lawn' ? 'efficient rotary sprinklers for the lawn' : 'no lawn to spray'}.${m === 'spray' ? ' Sprinklers water beds less efficiently than drip.' : ''}</p>
+      <h3 class="irr__h">Zones</h3><ul class="irr__zones" id="irrZones"><li class="footnote">Working out your zones…</li></ul>
+      <h3 class="irr__h">Watering schedule${state.zip ? ' for ' + esc(place() || state.zip) : ''}</h3><div id="irrSched"><p class="footnote">${state.zip ? 'Loading local climate…' : 'Add your ZIP in Adjust → Location to see a schedule and local water rules.'}</p></div>`}
+   <h3 class="irr__h">How-to guides</h3><p class="footnote">Simple step-by-step guides with diagrams if you do it yourself.</p>
+   <ul class="mlist irr__tuts">${tut.TUTORIALS.map(t => `<li><button class="row" type="button" data-tut="${t.id}"><b>${esc(t.title)}</b><span>${esc(t.summary)}</span></button></li>`).join('')}</ul>
+   <div id="irrTut"></div>
+   <p class="footnote legal">A planning guide, not a construction plan. Follow local codes; backflow devices often need a licensed installer. Call 811 before you dig.</p></section>`;
+  el.querySelectorAll('#irrSeg [data-irr]').forEach(b => b.onclick = () => setIrrigation(b.dataset.irr, 'sheet'));
+  const add = $('#irrAdd'); if (add) add.onclick = () => setIrrigation('drip', 'sheet');
+  el.querySelectorAll('[data-tut]').forEach(b => b.onclick = () => { const t = tut.TUTORIALS.find(x => x.id === b.dataset.tut); const box = $('#irrTut'); box.innerHTML = tut.tutorialHtml(t, esc); box.querySelector('[data-tutclose]').onclick = () => { box.innerHTML = ''; b.focus(); }; box.scrollIntoView({ block: 'start', behavior: 'smooth' }); box.querySelector('h3')?.focus(); });
+  if (m === 'none') return;
+  const T = F.takeoff?.irrigation, zl = $('#irrZones');
+  if (T) zl.innerHTML = T.hydrozones.map((z, i) => `<li><i style="background:${z.color}"></i><div><b>Zone ${i + 1}</b><span>${esc(z.name)} · ${z.emitterCount ? z.emitterCount + ' drippers' : z.headCount + ' sprinkler heads'}</span></div></li>`).join('') + `<li class="footnote">${esc(T.equipment.controller.recommendation)}</li>`;
+  $('#inDl')?.remove(); $('#infoFoot').insertAdjacentHTML('afterbegin', '<button class="btn btn--secondary btn--lg" type="button" id="inDl">Download parts list</button>');
+  $('#inDl').onclick = () => { const L = (F.mode === 'diy' ? P.est.diy.lines : P.est.pro.lines).filter(l => String(l.key).startsWith('irr-'));
+    const csv = 'Part,Qty,Unit,Estimated cost\n' + L.map(l => [l.description, l.qty, l.unit, l.amount].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `yardplan-irrigation-parts.csv`; document.body.append(a); a.click(); a.remove(); };
+  if (!state.zip) return;
+  try { const g = await import('./guides/irrigation.js'); const plan = g.generateIrrigationPlan(F.irrigation === 'spray' ? sprayView(F.design) : F.design, { catalog: CATALOG(), zip: state.zip });
+    if (!$('#irrSched')?.isConnected || F.irrigation !== m) return; const mo = new Date().getMonth();
+    const rows = plan.hydrozones.map((z, i) => { const x = z.monthly[mo]; return `<li><b>Zone ${i + 1}</b><span>${x.off || !x.eventsPerWeek ? 'Off this month (rain or dormant)' : `${x.eventsPerWeek >= 1 ? Math.round(x.eventsPerWeek) + '× a week' : 'Every ' + x.intervalDays + ' days'}, about ${Math.round(x.minutesPerEvent)} min`}</span></li>`; }).join('');
+    const rules = plan.notes.filter(n => /^Local rules/.test(n));
+    $('#irrSched').innerHTML = `<p class="footnote">This month (${plan.hydrozones[0]?.monthly[mo]?.month || ''}). New plants need more for the first 12 weeks.</p><ul class="irr__sched">${rows}</ul>
+      ${rules.length ? rules.map(r => `<p class="callout">${esc(r)}</p>`).join('') : '<p class="footnote">Check your water utility for watering-day rules.</p>'}
+      ${state.zip && /^9[0-6]/.test(state.zip) ? `<p class="footnote">California water budget (MWELO): ${plan.mwelo.compliant ? 'this plan fits the state water budget' : 'over the state water budget — use more low-water plants or less lawn'}${plan.mwelo.applies ? '' : ' (a permit is usually only needed for 500+ sq ft of new landscape)'}.</p>` : ''}`;
+  } catch (e) { console.warn(e); const s = $('#irrSched'); if (s) s.innerHTML = '<p class="footnote">Couldn\'t load a local schedule. Water early morning, deeply and less often.</p>'; }
+}
+const sprayView = d => ({ ...d, items: d.items.filter(i => i.kind !== 'plant').map(i => i.kind === 'mulch' ? { ...i, kind: 'lawn' } : i) });
 // ---------- the Adjust sheet (one sheet, rows expand inline) ----------
 let dirty = false, swapOpen = null;
 let adjStart = null;
@@ -419,6 +478,8 @@ function renderAdjust() {
     <ul class="plist">${P.map(p => `<li><img src="img/plants/${p.id}.jpg" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><div><b>${esc(p.name)}</b><span>${sunOf(p)} · ${waterOf(p)}</span></div><button class="btn btn--secondary btn--sm" type="button" data-swap="${p.id}" aria-expanded="${swapOpen === p.id}" aria-label="Swap ${esc(p.name)}">Swap</button></li>${swapOpen === p.id ? `<li class="swaplist"><div class="pick">${swapAlts(p).map(q => `<button class="prow" type="button" data-to="${q.id}"><img src="img/plants/${q.id}.jpg" alt="" onerror="this.style.visibility='hidden'"><span><b>${esc(q.name)}</b><span>${esc(q.size)} · ${waterOf(q)}</span></span></button>`).join('') || '<p class="muted">No other matches for your area.</p>'}</div></li>` : ''}`).join('')}</ul></details>
    <details class="adj" data-row="ground"><summary>Ground <span>${esc(groundName(F.ground))}</span></summary>
     <div class="chips" role="radiogroup" aria-label="Ground">${GROUNDS.map(([k, n]) => `<button class="chip" type="button" role="radio" aria-checked="${F.ground === k}" aria-pressed="${F.ground === k}" data-g="${k}">${n}</button>`).join('')}</div></details>
+   <details class="adj" data-row="irrigation"><summary>Irrigation <span>${F.irrigation === 'none' ? 'Not included · optional' : IRRN[F.irrigation] + ' · included'}</span></summary>
+    <p class="footnote">Add a watering system to your plan. Drip is best for beds and trees.</p>${segIrr('adjIrr')}</details>
    <details class="adj" data-row="rebates"><summary>Rebates <span id="adjRebS">${F.plan?.rebate ? 'Up to ' + money(F.plan.rebate) : 'Check yours'}</span></summary><div id="adjReb"></div></details>
    <details class="adj" data-row="photo"><summary>Photo <span>Rotate or fix the view</span></summary>
     <div class="chips"><button class="chip" type="button" data-adj="rotate">Rotate</button></div>
@@ -431,6 +492,7 @@ function renderAdjust() {
   b.querySelector('#adjRange').oninput = e => { setBudget(fromT(+e.target.value)); clearTimeout(renderAdjust.t); renderAdjust.t = setTimeout(repriced, 250); };
   b.querySelectorAll('#adjWho [data-m]').forEach(x => x.onclick = () => { setWho(x.dataset.m); repriced(); });
   b.querySelector('#adjFit').onclick = makeFit;
+  b.querySelectorAll('#adjIrr [data-irr]').forEach(x => x.onclick = () => { if (x.dataset.irr === F.irrigation) return; setIrrigation(x.dataset.irr, 'adj').then(() => b.querySelector('[data-row=irrigation]')?.setAttribute('open', '')); });
   b.querySelectorAll('[data-swap]').forEach(x => x.onclick = () => { swapOpen = swapOpen === x.dataset.swap ? null : x.dataset.swap; renderAdjust(); b.querySelector(`[data-swap="${x.dataset.swap}"]`)?.focus(); });
   b.querySelectorAll('[data-to]').forEach(x => x.onclick = () => { const was = swapOpen; F.plants = F.plants.map(i => i === was ? x.dataset.to : i); swapOpen = null; setDirty(); renderAdjust(); toast('Swapped. Tap Update my yard to see it.'); });
   b.querySelectorAll('[data-g]').forEach(x => x.onclick = () => { F.ground = x.dataset.g; b.querySelectorAll('[data-g]').forEach(y => { y.setAttribute('aria-checked', String(y === x)); y.setAttribute('aria-pressed', String(y === x)); }); b.querySelector('[data-row=ground] summary span').textContent = groundName(F.ground); setDirty(); });
@@ -454,7 +516,7 @@ function renderPlans() {
 $('#plansList').onclick = e => {
   const o = e.target.closest('[data-open]'), d = e.target.closest('[data-del]');
   if (o) { const p = plans().find(x => x.id === o.dataset.open); Object.assign(F, { style: p.style, stylePicked: true, plants: p.plants, ground: p.ground, tier: p.tier || null, manual: p.manual || null, saved: true, savedId: p.id, reopened: p });
-    if (p.budget) setBudget(p.budget); if (p.mode) F.mode = p.mode; localStorage.setItem('yardplan.style', p.style);
+    if (p.budget) setBudget(p.budget); if (p.mode) F.mode = p.mode; F.irrigation = p.irrigation || 'none'; localStorage.setItem('yardplan.style', p.style);
     if (p.zip && p.zip !== state.zip) { $('#zip').value = p.zip; $('#zipForm').requestSubmit(); } go('home'); step(3); }
   if (d) { const p = plans().find(x => x.id === d.dataset.del); if (confirm(`Delete "${p.name}"? This can't be undone.`)) { localStorage.setItem(PKEY, JSON.stringify(plans().filter(x => x.id !== p.id))); renderPlans(); updateNav(); toast('Design deleted'); } }
 };

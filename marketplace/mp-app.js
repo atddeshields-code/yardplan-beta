@@ -36,7 +36,19 @@ async function showInbox() {
   if (!who.options.length) { who.innerHTML = m.pros.map(p => `<option value="${p.proToken}">${p.businessName} (${p.verification})</option>`).join(''); who.onchange = showInbox; }
   document.querySelector('#leadsNote').innerHTML = mockNote(m.mock);
   if (!who.value) { el.innerHTML = '<p class="muted">Sign in to see your leads.</p>'; return; }
-  await renderProInbox(el, { client: m.client, token: who.value });
+  await renderProInbox(el, { client: m.client, token: who.value, owner: !!window.ownerApi?.isOwner() });
+  await showAdminQueue(m);
+}
+// Owner only: verification review queue (mock backend uses the mock admin token; a real Worker needs the owner's ADMIN_TOKEN, not stored in the app).
+async function showAdminQueue(m) {
+  const q = document.querySelector('#adminQueue'); if (!q) return; const on = !!window.ownerApi?.isOwner(); q.hidden = !on; if (!on) return;
+  if (!m.mock) { q.innerHTML = '<div class="card pad"><h3>Review queue</h3><p class="footnote">Connect the marketplace Worker with your admin token to review pros here.</p></div>'; return; }
+  const T = 'mock-admin', esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  let pros = []; try { const r = await m.client.admin.pros(T); pros = r.pros || r || []; } catch (e) { q.innerHTML = '<p class="footnote">Review queue unavailable.</p>'; return; }
+  const pend = pros.filter(p => p.verification !== 'verified');
+  q.innerHTML = `<div class="card pad stack"><div class="row"><h3>Review queue</h3><span class="badge badge--success">Owner</span></div>
+    <p class="footnote">Pros waiting for license verification. Demo data.</p>${pend.length ? pend.map(p => `<div class="aq"><div><b>${esc(p.businessName)}</b><span class="foot"> ${esc(p.license || '')} · ${esc(p.verification)}</span></div><span class="row"><button class="btn btn--primary btn--sm" data-aq="verified" data-id="${esc(p.id)}">Verify</button><button class="btn btn--secondary btn--sm" data-aq="rejected" data-id="${esc(p.id)}">Reject</button></span></div>`).join('') : '<p class="muted">Nothing to review.</p>'}</div>`;
+  q.querySelectorAll('[data-aq]').forEach(b => b.onclick = async () => { try { await m.client.admin.verify(T, b.dataset.id, b.dataset.aq, 'owner review'); } catch (e) { console.warn(e); } showAdminQueue(m); });
 }
 window.addEventListener('yardplan:tab', e => { if (e.detail === 'pros') showDirectory(); if (e.detail === 'leads') showInbox(); });
 window.mpApi = { init, getQuotes, showDirectory, showInbox };

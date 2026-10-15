@@ -1,3 +1,4 @@
+import "./siteplan/render.js";
 // 2D site plan editor (top-down, SVG, no WebGL). Same design format as before (v2: yard {w,d} ft, house, items with
 // kind plant|mulch|gravel|dg|path|lawn|wall|grade, x/z = center in ft from the yard center, w/d ft (plants: scale), r radians).
 // Classic globals: PLANTS, PLANT_SIZE, CREDITS, fits, go, renderMaterials ($('#area')…).
@@ -21,12 +22,15 @@ const el = (tag, a = {}, kids = []) => { const e = document.createElementNS(NS, 
 const txt = (s, a) => { const t = el('text', a); t.textContent = s; return t; };
 const ft = v => `${Math.round(v * 10) / 10} ft`;
 function draw(target = svg, { forExport = false, imgs = {} } = {}) {
-  const W = yard.w + 2 * M, H = yard.d + 2 * M; target.setAttribute('viewBox', `${-W / 2} ${-H / 2} ${W} ${H}`); target.replaceChildren();
+  const SP = meta.site && window.SiteRender, SV = SP ? window.SiteRender.viewBox(meta.site) : null;
+  const W = SP ? SV.w : yard.w + 2 * M, H = SP ? SV.h : yard.d + 2 * M; target.setAttribute('viewBox', SP ? `${SV.x} ${SV.y} ${SV.w} ${SV.h}` : `${-W / 2} ${-H / 2} ${W} ${H}`); target.replaceChildren();
   const defs = el('defs'); target.appendChild(defs);
   defs.appendChild(el('pattern', { id: 'pv', width: 2, height: 2, patternUnits: 'userSpaceOnUse' }, [el('rect', { width: 2, height: 2, fill: FEAT.path.fill }), el('path', { d: 'M0 0H2M0 0V2', stroke: '#fff', 'stroke-width': .12, opacity: .8 })]));
   defs.appendChild(el('pattern', { id: 'gv', width: 1.2, height: 1.2, patternUnits: 'userSpaceOnUse' }, [el('rect', { width: 1.2, height: 1.2, fill: FEAT.gravel.fill }), el('circle', { cx: .3, cy: .4, r: .12, fill: '#8f8a80' }), el('circle', { cx: .9, cy: .9, r: .1, fill: '#e3dfd6' })]));
   // surround + house strip
-  target.appendChild(el('rect', { x: -W / 2, y: -H / 2, width: W, height: H, fill: forExport ? '#ffffff' : 'var(--plan-bg, #f4f4f2)' }));
+  target.appendChild(el('rect', SP ? { x: SV.x, y: SV.y, width: W, height: H, fill: forExport ? '#ffffff' : 'var(--plan-bg, #f4f4f2)' } : { x: -W / 2, y: -H / 2, width: W, height: H, fill: forExport ? '#ffffff' : 'var(--plan-bg, #f4f4f2)' }));
+  if (SP) { const g0 = el('g', { class: 'pl-site' }); g0.innerHTML = window.SiteRender.base(meta.site, { skipTypes: ['lawn', 'bed', 'gravel'] }); target.appendChild(g0); }
+  if (!SP) {
   const h = getHouse(), side = h.side || 'left', hs = 4.5;
   const hr = side === 'left' ? { x: -yard.w / 2 - hs - .6, y: -yard.d / 2, width: hs, height: yard.d } : side === 'right' ? { x: yard.w / 2 + .6, y: -yard.d / 2, width: hs, height: yard.d } : side === 'back' ? { x: -yard.w / 2, y: -yard.d / 2 - hs - .6, width: yard.w, height: hs } : { x: -yard.w / 2, y: yard.d / 2 + .6, width: yard.w, height: hs };
   target.appendChild(el('rect', { ...hr, fill: '#d9d9de', stroke: '#9a9aa2', 'stroke-width': .15, rx: .3 }));
@@ -37,6 +41,7 @@ function draw(target = svg, { forExport = false, imgs = {} } = {}) {
   for (let x = -yard.w / 2 + 5; x < yard.w / 2; x += 5) grid.appendChild(el('line', { x1: x, y1: -yard.d / 2, x2: x, y2: yard.d / 2 }));
   for (let z = -yard.d / 2 + 5; z < yard.d / 2; z += 5) grid.appendChild(el('line', { x1: -yard.w / 2, y1: z, x2: yard.w / 2, y2: z }));
   target.appendChild(grid);
+  }
   // hardscape / beds first, plants on top (big first so small ones stay visible)
   const order = [...items].sort((a, b) => (a.kind === 'plant') - (b.kind === 'plant') || (a.kind === 'plant' ? plantW(b) - plantW(a) : 0));
   for (const it of order) {
@@ -47,11 +52,14 @@ function draw(target = svg, { forExport = false, imgs = {} } = {}) {
       const ir = Math.min(r * .72, 2.4, Math.max(.7, r * .6));
       if (src) { defs.appendChild(el('clipPath', { id: cid }, [el('circle', { r: ir })])); const im = el('image', { href: src, x: -ir, y: -ir, width: ir * 2, height: ir * 2, 'clip-path': `url(#${cid})`, preserveAspectRatio: 'xMidYMid slice' }); g.appendChild(im); g.appendChild(el('circle', { r: ir, fill: 'none', stroke: '#fff', 'stroke-width': .1 })); }
       else g.appendChild(txt(p?.icon || '•', { 'font-size': ir, 'text-anchor': 'middle', 'dominant-baseline': 'central' }));
+    } else if (it.pts) {
+      const f = FEAT[it.kind] || FEAT.mulch; g.setAttribute('transform', '');
+      g.appendChild(el('polygon', { points: it.pts.map(p => p.join(',')).join(' '), fill: f.pavers ? 'url(#pv)' : f.dots ? 'url(#gv)' : f.fill, 'fill-opacity': it.existing ? .75 : 1, stroke: f.stroke, 'stroke-width': .15, 'stroke-linejoin': 'round' }));
     } else {
       const f = FEAT[it.kind] || FEAT.mulch, wd = it.kind === 'wall' ? Math.max(.8, it.d || 1) : it.d;
       g.appendChild(el('rect', { x: -it.w / 2, y: -wd / 2, width: it.w, height: wd, rx: it.kind === 'mulch' || it.kind === 'lawn' ? Math.min(1.5, wd / 3) : .15, fill: f.pavers ? 'url(#pv)' : f.dots ? 'url(#gv)' : f.fill, stroke: f.stroke, 'stroke-width': .15 }));
     }
-    if (it === selected && !forExport) {
+    if (it === selected && !forExport && !it.pts) {
       const bw = it.kind === 'plant' ? plantW(it) : it.w, bd = it.kind === 'plant' ? plantW(it) : (it.kind === 'wall' ? Math.max(.8, it.d || 1) : it.d);
       g.appendChild(el('rect', { x: -bw / 2 - .4, y: -bd / 2 - .4, width: bw + .8, height: bd + .8, fill: 'none', stroke: '#00873A', 'stroke-width': .18, 'stroke-dasharray': '.6 .4', rx: it.kind === 'plant' ? bw / 2 + .4 : .4 }));
     }
@@ -68,6 +76,7 @@ function draw(target = svg, { forExport = false, imgs = {} } = {}) {
   }
   // valve manifold marker
   if (irr || placingHouse || house) { const m = manifold(); target.appendChild(el('g', { transform: `translate(${m.x} ${m.z})`, 'pointer-events': 'none' }, [el('rect', { x: -.9, y: -.6, width: 1.8, height: 1.2, rx: .25, fill: '#00873A', stroke: '#fff', 'stroke-width': .12 }), txt('Valves', { y: -1, 'font-size': .9, 'text-anchor': 'middle', fill: '#1d1d1f', 'font-weight': 600 })])); }
+  if (SP) { const g1 = el('g', { class: 'pl-site-ov' }); g1.innerHTML = window.SiteRender.overlay(meta.site, { forExport, vb: SV, sub: meta.site.label || '', attribution: meta.site.attribution || '' }); target.appendChild(g1); if (target === svg) refreshList(); return target; }
   // dimensions
   const dim = el('g', { stroke: '#1d1d1f', 'stroke-width': .08, fill: '#1d1d1f', 'font-size': 1.15, 'font-weight': 600, 'pointer-events': 'none' }), yT = yard.d / 2 + 2.2, xR = yard.w / 2 + 2.2;
   if ((getHouse().side || 'left') === 'front') { /* keep dims on top when the house is in front */ }
@@ -96,7 +105,7 @@ svg.addEventListener('pointerdown', e => {
   const g = e.target.closest('.pl-item'); const it = g && items.find(i => i.uid === g.dataset.uid);
   select(it || null); if (it) { svg.setPointerCapture(e.pointerId); drag = { it, dx: p.x - it.x, dz: p.z - it.z, moved: false }; }
 });
-svg.addEventListener('pointermove', e => { if (!drag) return; const p = toFt(e); drag.it.x = +clampX(p.x - drag.dx).toFixed(2); drag.it.z = +clampZ(p.z - drag.dz).toFixed(2); drag.moved = true; draw(); });
+svg.addEventListener('pointermove', e => { if (!drag || drag.it.pts) return; const p = toFt(e); drag.it.x = +clampX(p.x - drag.dx).toFixed(2); drag.it.z = +clampZ(p.z - drag.dz).toFixed(2); drag.moved = true; draw(); });
 svg.addEventListener('pointerup', () => { if (drag?.moved) changed(); drag = null; });
 svg.addEventListener('pointercancel', () => { drag = null; });
 function select(it) { selected = it; const s = !!it; $$('.pl-edit').forEach(b => b.disabled = !s); $('#plSel').textContent = it ? (it.kind === 'plant' ? `${PLANTS.find(p => p.id === it.id)?.name} · ${ft(plantW(it))} wide` : `${FEAT[it.kind]?.name || it.kind} · ${ft(it.w)} × ${ft(it.d)}`) : 'Nothing selected';
@@ -138,9 +147,9 @@ $('#plEst').onclick = () => {
   $$('#matChecks input').forEach(c => c.checked = mA ? ['mulch', 'fabric', 'edging'].includes(c.value) : pA ? c.value === 'pavers' : gA ? ['rock', 'fabric'].includes(c.value) : c.value === 'sod');
   renderMaterials(); go('materials');
 };
-function serialize() { return { v: 2, ...meta, yard: { ...yard }, house: { ...getHouse(), manifold: manifold() }, items: items.map(o => ({ kind: o.kind, id: o.id, x: o.x, z: o.z, r: +(o.r || 0).toFixed(3), w: o.w ?? 1, d: o.d ?? 1, ...(o.container ? { container: o.container } : {}), ...(o.renderAnchor ? { renderAnchor: o.renderAnchor } : {}), ...(o.kind === 'wall' ? { h: o.h, footing: o.footing, surcharge: o.surcharge || false } : {}) })).concat(grade.cutCuYd || grade.fillCuYd ? [{ kind: 'grade', cutCuYd: grade.cutCuYd, fillCuYd: grade.fillCuYd }] : []) }; }
+function serialize() { return { v: 2, ...meta, yard: { ...yard }, house: { ...getHouse(), manifold: manifold() }, items: items.map(o => ({ kind: o.kind, id: o.id, x: o.x, z: o.z, r: +(o.r || 0).toFixed(3), w: o.w ?? 1, d: o.d ?? 1, ...(o.container ? { container: o.container } : {}), ...(o.renderAnchor ? { renderAnchor: o.renderAnchor } : {}), ...(o.pts ? { pts: o.pts, existing: !!o.existing, siteId: o.siteId } : {}), ...(o.kind === 'wall' ? { h: o.h, footing: o.footing, surcharge: o.surcharge || false } : {}) })).concat(grade.cutCuYd || grade.fillCuYd ? [{ kind: 'grade', cutCuYd: grade.cutCuYd, fillCuYd: grade.fillCuYd }] : []) }; }
 function apply(data) {
-  meta = {}; for (const k of ['style', 'containerSizes', 'budgetOpts']) if (data[k] != null) meta[k] = data[k];
+  meta = {}; for (const k of ['style', 'containerSizes', 'budgetOpts', 'irrigation', 'site']) if (data[k] != null) meta[k] = data[k];
   Object.assign(yard, data.yard || {}); house = data.house && !data.house.isDefault ? { x: data.house.x, z: data.house.z, side: data.house.side } : null;
   const g = (data.items || []).find(it => it.kind === 'grade'); grade = g ? { cutCuYd: +g.cutCuYd || 0, fillCuYd: +g.fillCuYd || 0 } : { cutCuYd: 0, fillCuYd: 0 };
   items = (data.items || []).filter(it => it.kind !== 'grade' && (it.kind !== 'plant' || PLANT_SIZE[it.id])).map(it => ({ uid: uid(), ...it, w: it.w ?? 1, d: it.d ?? 1, ...(it.kind === 'wall' ? { h: +it.h || 2.5, footing: +it.footing || 0, surcharge: it.surcharge || false } : {}) }));
