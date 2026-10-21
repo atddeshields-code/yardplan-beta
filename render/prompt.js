@@ -48,7 +48,8 @@ export function suggestPlants(style, zone, n = 6) {
 }
 
 /**
- * design: { style, zone, region, plants:[id|{id,count}], hardscape:[keys], layout:[{id,x,y}] (x,y image fractions 0..1), notes }
+ * design: { style, zone, region, plants:[id|{id,count}], hardscape:[keys], layout:[{id,x,y}] (x,y image fractions 0..1), notes,
+ *   walkway? (v21: walkway.js walkText — the path starts at the house's back door) }
  * opts:   { view:'ground'|'drone'|'top', provider, season, timeOfDay, mask:boolean, guide:boolean, aspect:'3:4', maxChars }
  */
 export function buildRenderPrompt(design = {}, opts = {}) {
@@ -77,6 +78,7 @@ export function buildRenderPrompt(design = {}, opts = {}) {
     [6, z != null && `USDA hardiness zone ${design.zone}; plants look healthy and climate-appropriate.`],
     [1, plants.length && `Plants (correct scale for a young-to-mid-maturity install${view === 'top' ? ', canopy circles' : ''}): ${plants.map(({ p, c }) => plantPhrase(p, c)).join('; ')}.`],
     [3, hard.length && `Hardscape: ${hard.join('; ')}.`],
+    [1, design.walkway && `Walkway: ${String(design.walkway).slice(0, 240)}; it connects to the house, it does not float in the lawn.`],
     [1, layoutText(design.layout, view)],
     [1, opts.guide && 'A second image is a layout guide rendered from the to-scale 3D plan: match plant positions and sizes to its colored markers, but make everything photographic (do not copy the guide\'s look).'],
     [0, opts.styleRef && 'Another image is the STYLE REFERENCE: an earlier render of this same yard from a different angle. Use exactly the same plant species, sizes, bed shapes, path material, boulders and colors so the views match; only the camera differs.'],
@@ -88,7 +90,7 @@ export function buildRenderPrompt(design = {}, opts = {}) {
   ];
   const negative = 'Avoid: text, labels, watermarks, logos, people, animals, cars, changed camera angle, changed aspect ratio, cropping, warped fences or buildings, new structures, lawn (unless requested), oversaturated colors, cartoon or 3D-render look, plants floating or out of scale.';
   const max = opts.maxChars || PROVIDER_LIMITS[opts.provider] || PROVIDER_LIMITS.default;
-  if (max < 900 && !opts.noCompact) { const c = compactPrompt({ view, style, region: design.region, plants, hard: design.hardscape || [], layout: design.layout, opts, max }); return { ...c, negative, view, warnings }; }
+  if (max < 900 && !opts.noCompact) { const c = compactPrompt({ view, style, region: design.region, plants, hard: design.hardscape || [], layout: design.layout, walkway: design.walkway, opts, max }); return { ...c, negative, view, warnings }; }
   const inlineNeg = opts.provider !== 'sdxl'; // SDXL takes a separate negative_prompt
   let live = tagged.filter(t => t[1]); const join = () => { const p = live.map(t => t[1]).join(' '); return inlineNeg ? `${p} ${negative}` : p; };
   let text = join(), truncated = false;
@@ -107,10 +109,10 @@ export function layoutText(layout, view) {
 
 /** Concise instruction style for models with short text encoders (Kontext dev/pro ~512 T5 tokens, SD1.5 CLIP 77 tokens).
  * Tested 2026-10-13 on Austin's photo: Kontext dev gave a far better result with this than with the long prompt. */
-export function compactPrompt({ view, style, region, plants, hard, layout, opts = {}, max = 700 }) {
+export function compactPrompt({ view, style, region, plants, hard, layout, walkway, opts = {}, max = 700 }) {
   const reg = region === 'high-desert' ? 'high-desert (Reno, Nevada) ' : '';
   const hs = { pavers: 'a curving natural flagstone path', dg: 'decomposed granite paths', riverrock: 'a river rock dry creek', boulders: 'a few large granite boulders', edging: 'steel edging', mulch: 'dark bark mulch beds', gravel: 'gravel', wall: 'a low stone wall' };
-  const hardTxt = hard.map(k => hs[k]).filter(Boolean); const names = plants.map(({ p }) => p.name.replace(/\s*\(.*?\)|'.*?'/g, '').trim().toLowerCase());
+  const hardTxt = [walkway && String(walkway).slice(0, 200), ...hard.filter(k => !(walkway && k === 'pavers')).map(k => hs[k])].filter(Boolean); const names = plants.map(({ p }) => p.name.replace(/\s*\(.*?\)|'.*?'/g, '').trim().toLowerCase());
   const lay = (layout || []).slice(0, 6).map(l => { const p = plants.find(x => x.p.id === l.id); return p && `${p.p.name.toLowerCase()} ${l.y > .66 ? 'in front' : l.y < .34 ? 'at the back' : 'mid-yard'} ${l.x < .34 ? 'left' : l.x > .66 ? 'right' : 'center'}`; }).filter(Boolean);
   const top = view === 'top';
   const parts = [

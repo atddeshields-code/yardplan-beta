@@ -2,6 +2,10 @@
 // Browser: <script src="vendor/jspdf.umd.min.js"></script> sets window.jspdf. Node: pass { jsPDF } explicitly.
 import { roundLines } from './budget-fit.js';
 import { STANDARD_NOTICES } from './compliance.js';
+import { parseBudget } from './parse-budget.js';
+import { caDepositPct } from './p1/phasing.js';
+import { depositDefault, NEUTRAL_PCT } from './data/state-deposit.js';
+import { zip3ToState } from '../marketplace/data/zip3-state.js';
 
 const money = n => '$' + Math.round(+n || 0).toLocaleString('en-US');   // whole dollars everywhere client-facing
 // Standard PDF fonts are WinAnsi-only: map common Unicode to safe text.
@@ -15,7 +19,7 @@ const imgFmt = d => (/^data:image\/(png|jpe?g|webp)/i.exec(d || '') || [, 'PNG']
  *   project:{title,date,zip,zone}, images:{before,after (AI render),plan (2D site plan),renders:[dataURL|{src,caption}]}, takeoff, bid, tier?:id,
  *   warnings (from checkCompliance), terms:[string]|string, validDays=30, footers=true (false: skip page footers; caller must draw them) }
  */
-const budgetNum = v => { const n = Math.round(+String(v ?? '').replace(/[^\d.]/g, '')); return n > 0 ? n : 0; };
+const budgetNum = v => parseBudget(v).value; // overnight C2: reuse parseBudget (ranges / k / m) — never concatenate digits
 export function buildProposalPdf(o = {}) {
   const J = o.jsPDF || (globalThis.jspdf && globalThis.jspdf.jsPDF) || globalThis.jsPDF;
   if (!J) throw new Error('jsPDF not loaded: include vendor/jspdf.umd.min.js or pass { jsPDF }');
@@ -108,9 +112,23 @@ export function buildProposalPdf(o = {}) {
   for (const w of warns) para('PRO REQUIRED: ' + w.message);
   for (const n of STANDARD_NOTICES) para(n.message);
   h2('Terms');
+  // Overnight C5: default deposit followed the old 50% line, which breaks CA home-improvement law (CSLB: lesser of $1,000 or 10%).
+  // Layout unchanged; only the default terms string is state-aware. Pass o.terms to override.
+  const st = (o.project && o.project.state) || zip3ToState[String((o.project && o.project.zip) || '').slice(0, 3)] || 'CA';
+  const totAmt = bid ? Math.round(((o.tier && bid.tiers && bid.tiers.find(t => t.id === o.tier)) ? bid.tiers.find(t => t.id === o.tier).totals : bid.totals).total || 0) : 0;
+  const depDefault = (() => {
+    if (st === 'CA' || !st) { const pct = caDepositPct(totAmt), amt = Math.round(totAmt * pct / 100);
+      return totAmt > 0 ? `Deposit due at signing: $${amt.toLocaleString('en-US')} (${pct % 1 ? pct.toFixed(1) : pct}% — California home-improvement cap: the lesser of $1,000 or 10%). Balance due on completion.`
+        : 'Deposit due at signing: the lesser of $1,000 or 10% of the contract price (California home-improvement cap). Balance due on completion.'; }
+    // v19 (Austin #2): other states — statutory cap preset where verified (data/state-deposit.js, sources cited there); else neutral 10% + edit note.
+    const D = depositDefault(st, totAmt), pc = D.pct % 1 ? (D.pct === 100 / 3 ? 'one-third' : D.pct.toFixed(1) + '%') : D.pct + '%';
+    if (D.preset) return totAmt > 0 ? `Deposit due at signing: $${D.amount.toLocaleString('en-US')} (${pc} — ${D.label}). Balance due on completion.` : `Deposit due at signing: ${D.label}. Balance due on completion.`;
+    return totAmt > 0 ? `Deposit due at signing: $${D.amount.toLocaleString('en-US')} (${pc}). Balance due on completion. (Default only: deposit rules differ by state. Edit these terms for your state's law.)`
+      : `Deposit due at signing: ${NEUTRAL_PCT}% of the contract price. Balance due on completion. (Default only: deposit rules differ by state. Edit these terms for your state's law.)`;
+  })();
   const terms = Array.isArray(o.terms) ? o.terms : o.terms ? [o.terms] : [
     'Price includes materials, labor, and cleanup for the scope listed. Changes to scope will be quoted separately in writing.',
-    '50% deposit due at signing; balance due on completion.', 'Plant material warrantied for one year when watered per care instructions.',
+    depDefault, 'Plant material warrantied for one year when watered per care instructions.',
     'Quantities are estimates from a conceptual design; final quantities confirmed on site. Excludes permits, engineering, and utility relocation unless listed.'];
   terms.forEach((t, i) => para(`${i + 1}. ${t}`, 9));
   // ---- signatures ----

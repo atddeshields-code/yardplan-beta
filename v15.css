@@ -10,9 +10,9 @@ body[data-mode=home] .careadj,body[data-mode=home] .mwelo-card,body[data-mode=ho
 /* 3-part progress */
 .prog{margin:var(--space-2) 0 var(--space-6)}
 .prog ol{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;list-style:none;margin:0;padding:0}
-.prog li{display:flex;flex-direction:column;gap:6px;font-size:var(--text-footnote);color:var(--text-subtle)}
+.prog li{display:flex;flex-direction:column;gap:6px;font-size:var(--text-footnote);color:var(--text-muted)}
 .prog li i{display:block;height:4px;border-radius:2px;background:var(--border-strong,rgba(127,127,127,.3))}
-.prog li.is-done i,.prog li.is-current i{background:var(--accent,#00a804)}
+.prog li.is-done i,.prog li.is-current i{background:var(--accent-strong)}
 .prog li.is-current{color:var(--text);font-weight:600}
 /* step 1 */
 .hero1{margin-bottom:var(--space-8)}.hero1 .ba{margin:var(--space-4) 0 0}.hero1 .eyebrow{margin:0}
@@ -38,14 +38,14 @@ body[data-mode=home] .careadj,body[data-mode=home] .mwelo-card,body[data-mode=ho
 .fsc .card__media{aspect-ratio:4/3;width:100%;height:auto;object-fit:cover}
 .fsc .card__body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:2px}
 .fsc .card__title{font-size:16px}
-.fsc .fsc__cost{font-weight:600;color:var(--success,#0a7d24)}.fsc .fsc__cost.is-over{color:var(--warning-text,#9a5b00)}
+.fsc .fsc__cost{font-weight:600;color:var(--success-text,#0B6B3A)}.fsc .fsc__cost.is-over{color:var(--warning-text,#9a5b00)}
 #fMore{margin-top:var(--space-3)}
 /* step 3 result */
 .res{display:grid;gap:var(--space-6)}
 @media (min-width:900px){.res{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);align-items:start}.res__media{position:sticky;top:72px}}
 .res__body h1{margin:0 0 var(--space-2)}
 .price-line{font:600 var(--text-headline,18px)/1.35 var(--font-sans);margin:0}
-.price-line.is-fit{color:var(--success,#0a7d24)}.price-line.is-over{color:var(--warning-text,#9a5b00)}
+.price-line.is-fit{color:var(--success-text,#0B6B3A)}.price-line.is-over{color:var(--warning-text,#9a5b00)}
 .price-line .linkbtn{font:inherit;margin-left:4px}
 .reb-line{margin:6px 0 0;font-weight:500}
 .res__btns{display:flex;gap:var(--space-2);margin:var(--space-4) 0}.res__btns .btn{flex:1}

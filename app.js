@@ -3,7 +3,7 @@ const state={zip:'',zone:null,zoneLabel:''};
 const img=id=>CREDITS[id]?`img/plants/${id}.jpg`:null;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 // ---- navigation ----
-function setMode(m){document.body.dataset.mode=m;const b=$('#modeBtn');b.hidden=m!=='pro';b.setAttribute('aria-pressed',m==='pro');try{localStorage.setItem('yardplan.mode',m)}catch(e){}}
+function setMode(m){document.body.dataset.mode=m;const b=$('#modeBtn');b.hidden=m!=='pro';b.setAttribute('aria-pressed',m==='pro');try{lsSet('yardplan.mode',m)}catch(e){}}
 setMode(localStorage.getItem('yardplan.mode')==='pro'?'pro':'home');
 $('#modeBtn').onclick=()=>{setMode('home');go('home');};$('#proEntry').onclick=()=>go('pro');{const p1=$('#proEntry1');if(p1)p1.onclick=()=>go('pro');}
 function go(tab){if(tab==='pro')setMode('pro');$$('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
@@ -21,18 +21,20 @@ async function lookupZone(zip){
 const zr=$('#zoneResult');
 // v15: ZIP -> "City, ST" (zippopotam.us, no key), falling back to the offline Census county file.
 async function lookupPlace(zip){
- try{const r=await fetch(`https://api.zippopotam.us/us/${zip}`);if(r.ok){const j=await r.json(),pl=j.places&&j.places[0];if(pl)return{city:pl['place name'],st:pl['state abbreviation']};}}catch(e){}
+ // run 4 H10: zippopotam's US set has no PR/VI (006–009) ZIPs and its 404 logged a console error; use the offline county file for those.
+ try{if(/^00[6-9]/.test(zip))throw 0;const r=await fetch(`https://api.zippopotam.us/us/${zip}`);if(r.ok){const j=await r.json(),pl=j.places&&j.places[0];if(pl)return{city:pl['place name'],st:pl['state abbreviation']};}}catch(e){}
  try{const m=await import('./guides/data/zip-county.js'),c=m.COUNTIES[m.ZIP_COUNTY[zip]];if(c)return{city:c[1],st:c[0]};}catch(e){}return null;}
 let zipSeq=0;
 $('#zipForm').onsubmit=async e=>{e.preventDefault();const zip=$('#zip').value.trim(),my=++zipSeq;zr.hidden=false;
  if(!/^\d{5}$/.test(zip)){zr.innerHTML='Enter a 5-digit ZIP code.';return;}
- state.zip=zip;state.place=null;state.zone=null;zr.innerHTML='Looking up your area…';window.dispatchEvent(new Event('yardplan:zone'));const [r,pl]=await Promise.all([lookupZone(zip),lookupPlace(zip)]);if(my!==zipSeq)return;state.place=pl;
+ state.zip=zip;state.place=null;state.zone=null;state.stretch=0;zr.innerHTML='Looking up your area…';window.dispatchEvent(new Event('yardplan:zone'));let known=true;try{const Z=(await import('./guides/data/usda-zones.js')).default;known=!!Z[zip]||!!ZIP_FALLBACK[zip];}catch(_){}
+ const [r,pl]=known?await Promise.all([lookupZone(zip),lookupPlace(zip)]):[null,null];if(my!==zipSeq)return;state.place=pl;
  const man=$('#zoneManual');if(r){if(man)man.hidden=true;setZone(r.zone,r.src);}else{zr.innerHTML=`We couldn't find that ZIP. Check it, or pick your zone instead.`;if(man)man.hidden=false;}renderMaterials();};
 function setZone(z,src){state.zone=parseInt(z,10);state.zoneLabel=z;$('#zoneSel').value=z;
  const n=PLANTS.filter(fits).length;zr.hidden=false;
- const pl=state.place;if(document.body.dataset.mode!=='pro'&&pl){zr.innerHTML=`<b>✓ ${esc(pl.city)}, ${esc(pl.st)}</b><small>${n} plants grow well here</small>`;}else zr.innerHTML=`<b>${pl?esc(pl.city)+', '+esc(pl.st)+' · ':state.zip?'ZIP '+state.zip+' · ':''}Zone ${z}</b> · ${n} plants do well here<small>${esc(src)}</small>`;
+ const pl=state.place;if(document.body.dataset.mode!=='pro'&&pl){zr.innerHTML=`<b>✓ ${esc(pl.city)}, ${esc(pl.st)}</b><small>${n} plant${n===1?'':'s'} grow${n===1?'s':''} well here</small>`;}else zr.innerHTML=`<b>${pl?esc(pl.city)+', '+esc(pl.st)+' · ':state.zip?'ZIP '+state.zip+' · ':''}Zone ${z}</b> · ${n} plant${n===1?'':'s'} do${n===1?'es':''} well here<small>${esc(src)}</small>`;
  $('#zonePill').textContent='Zone '+z;$('#moreZone').textContent=(state.zip?'ZIP '+state.zip+' · ':'')+'Zone '+z;window.dispatchEvent(new Event('yardplan:zone'));renderPlants();renderStyles();renderPalette();}
-const fits=p=>!state.zone||(state.zone>=p.zmin&&state.zone<=p.zmax);
+const fits=p=>!state.zone||(state.zone>=p.zmin&&state.zone<=p.zmax+(state.stretch||0));
 const sunTxt={full:'Full sun',part:'Part shade',shade:'Shade'},waterTxt={low:'Low water',med:'Med water',high:'High water'};
 function photo(p,cls='ph'){const s=img(p.id);return `<div class="${cls}">${s?`<img loading="lazy" src="${s}" alt="${esc(p.name)}" onerror="this.remove()">`:''}<div class="fb" ${s?'style="z-index:-1"':''}>${p.icon}</div><span class="badge">${p.type}</span></div>`}
 function plantCard(p){return `<article class="pc">${photo(p)}<div class="bd"><h3>${esc(p.name)}</h3><div class="sci">${esc(p.sci)}</div>
@@ -80,7 +82,7 @@ async function renderMaterials(){const a=Math.max(0,+$('#area').value||0),adj=+$
  <tr class="total"><th colspan="2">${allEst?'Example total':'Estimated total'}</th><th class="n">$${total.toLocaleString('en-US')}</th></tr></table>
  <p class="small" style="margin-top:10px">${foot} · your adjustment ×${adj.toFixed(2)}. Waste: pavers and sod +5%, fabric +10%; bagged mulch, rock, topsoil and edging have no waste allowance (the Pro takeoff adds 10%). Not a quote.</p>`;}
 // ---- photo overlay palette (photo tools live in photo.js) ----
-function renderPalette(){$('#palette').innerHTML=PLANTS.filter(fits).map(p=>`<button data-id="${p.id}">${img(p.id)?`<img src="${img(p.id)}" alt="" loading="lazy">`:`<span class="fbr">${p.icon}</span>`}${esc(p.name)}</button>`).join('');}
+function renderPalette(){$('#palette').innerHTML=PLANTS.filter(fits).map(p=>`<button data-id="${p.id}">${img(p.id)?`<img src="${img(p.id)}" alt="" loading="lazy" decoding="async">`:`<span class="fbr">${p.icon}</span>`}${esc(p.name)}</button>`).join('');}
 // ---- credits ----
 function licUrl(l){const m=/^CC (BY(?:-SA)?) (\d\.\d)$/i.exec((l||'').trim());if(m)return`https://creativecommons.org/licenses/${m[1].toLowerCase()}/${m[2]}/`;if(/^CC0/i.test(l))return'https://creativecommons.org/publicdomain/zero/1.0/';if(/public domain/i.test(l))return'https://creativecommons.org/publicdomain/mark/1.0/';return null;}
 function licLink(l){const u=licUrl(l);return u?`<a href="${u}" target="_blank" rel="noopener license">${esc(l)}</a>`:esc(l);}

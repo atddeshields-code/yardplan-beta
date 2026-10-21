@@ -1,5 +1,6 @@
 // takeoff.js — quantity takeoff from Yardplan design data (yard3d serialize() format).
 // Units: feet. Design: { v:2, yard:{w,d}, items:[{kind,id?,x,z,r,w,d, h?,footing?,surcharge?, cutCuYd?,fillCuYd?}] }
+import { isWalk, walkMeasure } from '../siteplan/walkway.js';
 export const CUFT_PER_CUYD = 27;
 
 // App purchase units (mirror data.js MATERIALS.unit) plus contractor-only keys.
@@ -42,6 +43,9 @@ const r2 = n => Math.round(n * 100) / 100;
 /** Measure one design item: {area sqft, perimeter ft, length ft, faceArea sqft} */
 export function measureItem(it) {
   const w = Math.abs(+it.w || 0), d = Math.abs(+it.d || 0);
+  // v21: walkway polylines are measured from the path itself: paver area = width × centre-line length (fillet arcs included),
+  // edge restraint = both sides + the free end (the house end needs none)
+  if (isWalk(it)) { const m = walkMeasure(it); return { area: m.area, perimeter: m.edging, length: 0, walkLength: m.length }; }
   if (it.kind === 'wall') { const h = +it.h || 0; return { area: 0, perimeter: 0, length: w, height: h, faceArea: w * (h + (+it.footing || 0)) }; }
   return { area: w * d, perimeter: 2 * (w + d), length: 0 };
 }

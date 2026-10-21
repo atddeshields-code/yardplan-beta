@@ -122,7 +122,11 @@ function syncInputs() {
   $('#horizon').value = st.horizon * 100; $('#tilt').value = st.tilt; $('#alt').value = st.alt; $('#fov').value = st.fov;
   $('#horVal').textContent = fmt.horizon(st.horizon); $('#tiltVal').textContent = fmt.tilt(st.tilt); $('#altVal').textContent = fmt.alt(st.alt); $('#fovVal').textContent = fmt.fov(st.fov);
   $('#camHVal').textContent = camHeight().toFixed(1) + ' ft';
-  $('#scaleVal').textContent = !st.ftPerPx ? 'not set' : st.scaleSet ? `${(1 / st.ftPerPx).toFixed(2)} px per ft` : `not set yet (assuming the photo is 120 ft wide, ${(1 / st.ftPerPx).toFixed(2)} px per ft)`;
+  // Overnight B17: assumed 120 ft scale looked like real numbers; flag the label in warn color until a scale line is set.
+  const sv = $('#scaleVal');
+  if (!st.ftPerPx) { sv.textContent = 'not set'; sv.classList.add('st--warn'); }
+  else if (st.scaleSet) { sv.textContent = `${(1 / st.ftPerPx).toFixed(2)} px per ft`; sv.classList.remove('st--warn'); }
+  else { sv.textContent = `≈ not set yet (assuming the photo is 120 ft wide, ${(1 / st.ftPerPx).toFixed(2)} px per ft)`; sv.classList.add('st--warn'); }
 }
 for (const [id, key, k] of [['horizon', 'horizon', .01], ['tilt', 'tilt', 1], ['alt', 'alt', 1], ['fov', 'fov', 1]]) $('#' + id).oninput = e => { st[key] = +e.target.value * k; syncInputs(); render(); };
 function setTool(t) { st.tool = t; $('#refBtn').classList.toggle('active', t === 'ref'); $('#scaleBtn').classList.toggle('active', t === 'scale'); if (t) { const r = $('#ovStage').getBoundingClientRect(); if (r.top < 0 || r.bottom > innerHeight) $('#ovStage').scrollIntoView({ block: 'center' }); setPlacing(null); ovHint(t === 'ref' ? 'Drag from the base to the top of your reference object.' : 'Drag along the object with the known length.'); } else ovHint(''); drawGuides(); }
@@ -149,10 +153,11 @@ function drawGuides() {
   const flat = st.view === 'top' ? 1 : st.view === 'drone' ? .6 : .35;
   projectItems().forEach(p => { const px = p.x * W, py = p.y * H, it = items[p.i], on = it === selected;
     if (st.measure) { const R = Math.max(4 * d, p.r * W); x.setLineDash([6 * d, 4 * d]); x.strokeStyle = on ? '#f2b84b' : 'rgba(255,255,255,.95)'; x.lineWidth = 2 * d; x.beginPath(); x.ellipse(px, py, R, R * flat, 0, 0, 7); x.stroke(); x.setLineDash([]);
-      const pl = PLANTS.find(q => q.id === p.id); label(x, `${pl ? pl.name : p.id} · ${Math.round(widthFt(it))} ft wide`, px + R + 4 * d, py); }
-    x.fillStyle = on ? '#f2b84b' : '#00873A'; x.strokeStyle = '#fff'; x.lineWidth = 2 * d; x.beginPath(); x.arc(px, py, 6 * d, 0, 7); x.fill(); x.stroke(); });
+      const pl = PLANTS.find(q => q.id === p.id); const wLab = st.view === 'top' && !st.scaleSet ? `≈ ${Math.round(widthFt(it))} ft wide (scale not set)` : `${Math.round(widthFt(it))} ft wide`;
+      label(x, `${pl ? pl.name : p.id} · ${wLab}`, px + R + 4 * d, py, st.view === 'top' && !st.scaleSet); }
+    x.fillStyle = on ? '#f2b84b' : '#0B6B3A'; x.strokeStyle = '#fff'; x.lineWidth = 2 * d; x.beginPath(); x.arc(px, py, 6 * d, 0, 7); x.fill(); x.stroke(); });
   if (st.view !== 'top') line(st.ref, `${$('#refH').value} ft`, '#f2b84b'); else line(st.scaleLine, `${$('#scaleL').value} ft`, '#f2b84b');
-  function label(x, t, px, py) { const w = x.measureText(t).width + 10 * d; x.fillStyle = 'rgba(17,17,17,.78)'; x.fillRect(px - 4 * d, py - 14 * d, w, 18 * d); x.fillStyle = '#fff'; x.fillText(t, px + d, py); }
+  function label(x, t, px, py, warn) { const w = x.measureText(t).width + 10 * d; x.fillStyle = warn ? 'rgba(154,91,0,.92)' : 'rgba(17,17,17,.78)'; x.fillRect(px - 4 * d, py - 14 * d, w, 18 * d); x.fillStyle = warn ? '#FFF4E0' : '#fff'; x.fillText(t, px + d, py); }
 }
 function ovHint(t) { const h = $('#ovHint'); h.hidden = !t; h.textContent = t; }
 function setPlacing(id) { placing = id; $$('#palette button').forEach(b => b.classList.toggle('on', b.dataset.id === id)); if (id) ovHint(`Tap the ground in the photo to place ${PLANTS.find(p => p.id === id).name}.`); }

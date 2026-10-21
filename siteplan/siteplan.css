@@ -6,9 +6,9 @@ dialog.sp{width:100%;max-width:100%;height:100%;max-height:100%;margin:0;border-
 .sp__head>div{flex:1;min-width:0}.sp__head h2{margin:0;font:700 17px/1.2 var(--font-sans)}.sp__src{margin:2px 0 0;font-size:12px;color:var(--text-muted)}
 .sp__prog{padding:16px 18px}.sp__prog ol{list-style:none;margin:0;padding:0}.sp__prog li{display:flex;gap:10px;align-items:center;padding:7px 0;color:var(--text-muted)}
 .sp__prog li i{width:18px;height:18px;border-radius:50%;border:2px solid var(--border);flex:none}
-.sp__prog li[data-st=run]{color:var(--text)}.sp__prog li[data-st=run] i{border-color:var(--accent);border-top-color:transparent;animation:spspin .8s linear infinite}
-.sp__prog li[data-st=ok]{color:var(--text)}.sp__prog li[data-st=ok] i{background:var(--accent);border-color:var(--accent)}
-.sp__prog li[data-st=warn] i{background:#e6a23c;border-color:#e6a23c}.sp__prog li[data-st=err] i{background:#d9534f;border-color:#d9534f}
+.sp__prog li[data-st=run]{color:var(--text)}.sp__prog li[data-st=run] i{border-color:var(--accent-strong);border-top-color:transparent;animation:spspin .8s linear infinite}
+.sp__prog li[data-st=ok]{color:var(--text)}.sp__prog li[data-st=ok] i{background:var(--accent-strong);border-color:var(--accent-strong)}
+.sp__prog li[data-st=warn] i{background:var(--warn);border-color:var(--warn)}.sp__prog li[data-st=err] i{background:var(--danger);border-color:var(--danger)}
 @keyframes spspin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.sp__prog li i{animation:none!important}}
 .sp__fail{margin-top:10px;padding:12px;border-radius:12px;background:var(--surface)}
 .sp__stage{position:relative;flex:1;min-height:0;background:var(--plan-bg,#f4f4f2)}

@@ -24,7 +24,7 @@ const outward = P => { const c = centroid(P); return e => { const nx = -(e.b[1] 
 export function overlay(site, { forExport = false, title = 'Site plan', sub = '', attribution = '', vb } = {}) {
   let s = `<g class="sp-dims" fill="#1d1d1f" stroke="#1d1d1f" stroke-width=".07" font-weight="600" font-family="Inter, Helvetica, Arial, sans-serif" pointer-events="none">`;
   // lot lines: dash-dot + dims on every edge (≥ 3 ft)
-  s += `<polygon points="${pts(site.lot)}" fill="none" stroke="#c0392b" stroke-width=".25" stroke-dasharray="2 .5 .4 .5"/>`;
+  s += `<polygon points="${pts(site.lot)}" fill="none" stroke="#C0262D" stroke-width=".25" stroke-dasharray="2 .5 .4 .5"/>`;
   const bb = bbox(site.lot), K = Math.max(1, Math.max(bb.x1 - bb.x0, bb.z1 - bb.z0) / 80); s = s.replace('stroke-width=".07"', `stroke-width="${.07 * K}"`);
   const oL = outward(site.lot); for (const e of edges(site.lot)) if (e.len >= 3) s += dimLine(e.a, e.b, fmtFt(e.len), 2.4 * K * oL(e), 1.3 * K);
   for (const H of site.shapes.filter(x => x.type === 'house')) { const oH = outward(H.pts); for (const e of edges(H.pts)) if (e.len >= 6) s += dimLine(e.a, e.b, fmtFt(e.len), 1.4 * K * oH(e), 1 * K); }
@@ -40,7 +40,7 @@ export function overlay(site, { forExport = false, title = 'Site plan', sub = ''
   // title block
   const KT = Math.max(1, Math.max(V.w, V.h) / 110), tw = Math.min(V.w - 4, 46 * KT), tx = V.x + V.w - tw - 2, ty = V.y + V.h - 7.2 * KT, src = site.source === 'survey' ? `Lot lines per survey${site.surveyDate ? ' dated ' + esc(site.surveyDate) : ''}${site.surveyor ? ' by ' + esc(site.surveyor) : ''}` : site.lotEstimated ? 'Lot lines estimated — confirm on site' : 'Approximate, from aerial + public parcel data. Not a survey.';
   s += `<g><rect x="${tx}" y="${ty}" width="${tw}" height="${6.4 * KT}" fill="#fff" stroke="#1d1d1f" stroke-width="${.12 * KT}"/><text x="${tx + .8 * KT}" y="${ty + 1.7 * KT}" font-size="${1.15 * KT}" stroke="none">${esc(title)}</text><text x="${tx + .8 * KT}" y="${ty + 3.1 * KT}" font-size="${.8 * KT}" font-weight="500" stroke="none">${esc(sub || site.label || '')}</text>`
-    + `<text x="${tx + .8 * KT}" y="${ty + 4.4 * KT}" font-size="${.72 * KT}" font-weight="500" stroke="none" fill="${site.source === 'survey' ? '#1d1d1f' : '#b03a2e'}">${src}</text><text x="${tx + .8 * KT}" y="${ty + 5.6 * KT}" font-size="${.6 * KT}" font-weight="400" stroke="none" fill="#666">${esc(attribution || site.attribution || '')}</text></g>`;
+    + `<text x="${tx + .8 * KT}" y="${ty + 4.4 * KT}" font-size="${.72 * KT}" font-weight="500" stroke="none" fill="${site.source === 'survey' ? '#1d1d1f' : '#C0262D'}">${src}</text><text x="${tx + .8 * KT}" y="${ty + 5.6 * KT}" font-size="${.6 * KT}" font-weight="400" stroke="none" fill="#666">${esc(attribution || site.attribution || '')}</text></g>`;
   return s + '</g>';
 }
 export const viewBox = site => { const b = bbox(site.lot), K = Math.max(1, Math.max(b.x1 - b.x0, b.z1 - b.z0) / 110); return { x: b.x0 - 8 * K, y: b.z0 - 8 * K, w: b.x1 - b.x0 + 16 * K, h: b.z1 - b.z0 + 8 * K + 14 * K }; };

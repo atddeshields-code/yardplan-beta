@@ -69,12 +69,12 @@
 
   --accent:         #00C805;  /* brand green (Robinhood-like) — FILL ONLY; 2.27:1 on white, never as text */
   --on-accent:      #0B0B0F;  /* ink on brand green 8.67:1 */
-  --accent-strong:  #00873A;  /* primary button fill; white text 4.64:1 */
-  --accent-text:    #006E2F;  /* links/green text on bg or surface: 6.42:1 on white */
-  --accent-soft:    #E6F9EA;  /* selected chip bg, success bg */
+  --accent-strong:  #0B6B3A;  /* primary button fill; white text 4.64:1 */
+  --accent-text:    #0B6B3A;  /* links/green text on bg or surface: 6.42:1 on white */
+  --accent-soft:    #E6F2EA;  /* selected chip bg, success bg */
   --on-accent-strong: #FFFFFF;
 
-  --success:   #00873A;  --success-text: #006E2F; --success-bg: #E6F9EA;
+  --success:   #0B6B3A;  --success-text: #0B6B3A; --success-bg: #E6F2EA;
   --warn:      #B26A00;  --warn-text: #9A5B00 /* 5.43:1 */; --warn-bg: #FFF4E0; --on-warn-bg: #5C3700 /* 9.63:1 */;
   --danger:    #D92D20 /* white text 4.83:1 */; --danger-text: #C4271C /* 5.75:1 */; --danger-bg: #FDECEA;
   --focus:     #0A66FF;  /* 4.82:1 on white; ring 2px + 2px offset */
@@ -103,15 +103,15 @@
     --text-subtle:   #76767F;   /* 4.01:1 on surface (large/icons) */
     --border:        #2A2A30;
     --border-strong: #76767F;   /* 4.01:1 on surface */
-    --accent:         #00D45A;  /* 10.57:1 on black, 9.08:1 on surface: usable as text in dark */
+    --accent:         #2FD16A;  /* 10.57:1 on black, 9.08:1 on surface: usable as text in dark */
     --on-accent:      #000000;  /* 10.57:1 */
-    --accent-strong:  #00D45A;  /* primary fill in dark, black label */
+    --accent-strong:  #2FD16A;  /* primary fill in dark, black label */
     --on-accent-strong: #000000;
-    --accent-text:    #00D45A;
+    --accent-text:    #2FD16A;
     --accent-soft:    rgba(0,212,90,.14);
-    --success: #00D45A; --success-text: #00D45A; --success-bg: rgba(0,212,90,.14);
-    --warn: #FFB547; --warn-text: #FFB547 /* 10.27:1 */; --warn-bg: rgba(255,181,71,.14); --on-warn-bg: #FFD9A0;
-    --danger: #FF6B5E; --danger-text: #FF6B5E /* 6.46:1 */; --danger-bg: rgba(255,107,94,.14);
+    --success: #2FD16A; --success-text: #2FD16A; --success-bg: rgba(0,212,90,.14);
+    --warn: #F5A524; --warn-text: #F5A524 /* 10.27:1 */; --warn-bg: rgba(255,181,71,.14); --on-warn-bg: #FFD9A0;
+    --danger: #FF6FAE; --danger-text: #FF6FAE /* 6.46:1 */; --danger-bg: rgba(255,107,94,.14);
     --focus: #5B9BFF;           /* 7.58:1 on black */
     --scrim: rgba(0,0,0,.60);
     --glass-bg: rgba(28,28,33,.68);
@@ -190,8 +190,8 @@ a { color: var(--accent-text); text-underline-offset: 2px; }
 
 .steps ol{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-1);list-style:none;margin:0;padding:0}
 .steps li{font-size:var(--text-caption);color:var(--text-muted);padding-top:var(--space-2);border-top:3px solid var(--surface-2);transition:border-color var(--dur-base)}
-.steps li.is-done{border-top-color:var(--accent)} .steps li.is-done a{color:var(--text);text-decoration:none}
-.steps li.is-current{border-top-color:var(--accent);color:var(--text);font-weight:600}
+.steps li.is-done{border-top-color:var(--accent-strong)} .steps li.is-done a{color:var(--text);text-decoration:none}
+.steps li.is-current{border-top-color:var(--accent-strong);color:var(--text);font-weight:600}
 @media (max-width:743px){.steps li{font-size:0}.steps li.is-current{font-size:var(--text-caption)}} /* bars only + current label */
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
@@ -217,7 +217,7 @@ a { color: var(--accent-text); text-underline-offset: 2px; }
 @keyframes fade-in{from{opacity:0;transform:translate(-50%,-48%) scale(.98)}}
 
 .toast{position:fixed;top:calc(var(--space-3) + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:var(--z-toast);display:flex;align-items:center;gap:var(--space-3);min-height:48px;padding:var(--space-2) var(--space-2) var(--space-2) var(--space-4);border-radius:var(--radius-full);background:var(--text);color:var(--bg);box-shadow:var(--shadow-3);font:500 var(--text-callout)/1.3 var(--font-sans);animation:toast-in var(--dur-base) var(--ease-emphasized)}
-.toast .btn--ghost{color:var(--accent)}       /* #00C805 on #0B0B0F ≈ 8.7:1 */
+.toast .btn--ghost{color:#2FD16A}       /* #00C805 on #0B0B0F ≈ 8.7:1 */
 .toast--error{background:var(--danger);color:#fff}
 @keyframes toast-in{from{opacity:0;transform:translate(-50%,-8px)}}
 @media (min-width:1024px){.toast{top:auto;left:auto;right:var(--space-6);bottom:var(--space-6);transform:none}}

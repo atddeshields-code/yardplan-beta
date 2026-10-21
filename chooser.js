@@ -3,7 +3,7 @@
 // plus the part-1 forms ?role= / ?mode= / #pro / #contractor / #home / #homeowner. Esc picks Homeowner.
 // Older saved state (yardplan.mode, saved plans, a design) counts as a choice, so returning users never see the chooser.
 (function () {
-  const K = 'yardplan.role', ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
+  const K = 'yardplan.role', ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { lsSet(k, v); } catch (e) {} } };
   const store = r => r === 'pro' ? 'contractor' : 'homeowner', norm = v => ({ pro: 'pro', contractor: 'pro', home: 'home', homeowner: 'home' })[String(v || '').toLowerCase()] || '';
   const q = new URLSearchParams(location.search), hs = location.hash.slice(1), link = norm(q.get('as') || q.get('role') || q.get('mode') || (/^\/(jobs|leads)/.test(hs) ? 'pro' : /^\/design/.test(hs) ? 'home' : hs));
   let role = norm(ls.get(K));

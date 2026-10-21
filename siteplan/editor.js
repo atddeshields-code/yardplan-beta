@@ -1,6 +1,6 @@
 // siteplan/editor.js — "Site plan" sheet: auto-draw from aerial, survey upload/trace, drone scale, and a 2D editor.
 // Opens with window.siteApi.open({ mode: 'aerial'|'survey'|'edit', address, site, who: 'home'|'pro', onDone(site, design) }).
-import { TYPES, AREA_TYPES, classify, buildSite, clipToLot, siteToDesign, rectilinear, area, centroid, dist, rot, edges, setEdgeLength, fmtFt, bbox, sid, parseCall, traverse, distanceLabels, callsIn, align2 } from './core.js';
+import { TYPES, AREA_TYPES, classify, buildSite, clipToLot, siteToDesign, rectilinear, area, centroid, dist, rot, edges, setEdgeLength, fmtFt, bbox, sid, parseCall, traverse, distanceLabels, callsIn, align2, selfIntersects } from './core.js';
 import { base as rBase, overlay as rOverlay, viewBox } from './render.js';
 import { gather, ATTR } from './sources.js';
 const $ = s => document.querySelector(s), esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -63,7 +63,10 @@ function manual() { const A = cache?.G?.aerial; $('#spProg').hidden = true;
   S = { v: 1, source: A ? 'aerial' : 'manual', approx: true, label: cache?.label || opts.address || '', north: 0, lot: [[-35, -25], [35, -25], [35, 25], [-35, 25]], shapes: [], trees: [], lotEstimated: true, attribution: A ? ATTR.naip : '' };
   if (A) layers.aerial = { url: A.url, W: A.W, H: A.H, ftPerPx: A.ftPerPx, cx: 0, cz: 0, rot: 0 };
   setSrc(); render(); $('#spDone').disabled = false; hint('Drag the red lot corners to your property lines, then add the house and beds with + Add.'); }
-function setSrc() { if (!S) return; $('#spSrc').textContent = S.source === 'survey' ? `From survey${S.surveyDate ? ' dated ' + S.surveyDate : ''}` : S.source === 'drone' ? 'From your drone photo · approximate' : 'Approximate · from aerial, not a survey';
+function setSrc() { if (!S) return;
+  const droneAssumed = S.source === 'drone' && layers.drone && layers.drone.scaleAssumed;
+  $('#spSrc').textContent = S.source === 'survey' ? `From survey${S.surveyDate ? ' dated ' + S.surveyDate : ''}` : droneAssumed ? '≈ From your drone photo · scale not set (assuming 120 ft wide)' : S.source === 'drone' ? 'From your drone photo · approximate' : 'Approximate · from aerial, not a survey';
+  $('#spSrc').classList.toggle('st--warn', !!droneAssumed);
   $('#spAlignBtn').hidden = !(layers.survey && layers.aerial); $('#spRedraw').hidden = !cache?.G; }
 // ---------- drawing ----------
 const pts = P => P.map(p => p.join(',')).join(' ');
@@ -76,7 +79,7 @@ function render() {
   let s = `<rect x="${V.x}" y="${V.y}" width="${V.w}" height="${V.h}" fill="var(--plan-bg,#f4f4f2)"/>`;
   for (const [key, L] of Object.entries(layers)) if (L?.url && show[key]) s += `<image href="${L.url}" x="${-L.W / 2}" y="${-L.H / 2}" width="${L.W}" height="${L.H}" transform="translate(${L.cx || 0} ${L.cz || 0}) rotate(${(L.rot || 0) * 180 / Math.PI}) scale(${L.ftPerPx})" opacity="${S ? (key === 'survey' ? .75 : .9) : 1}" preserveAspectRatio="none"/>`;
   if (S) { s += `<g class="sp-base">${rBase(S, { see: Object.keys(layers).some(k => show[k]) })}</g>`; s += rOverlay(S, { vb: V, sub: S.label, attribution: S.attribution || '' }); s += dimHits(k) + handles(k); }
-  if (trace) s += `<polyline points="${pts(trace.pts)}" fill="none" stroke="#00873A" stroke-width="${.25 * k}" stroke-dasharray="${k} ${.5 * k}"/>` + trace.pts.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="${(i ? .6 : .9) * k}" fill="${i ? '#00873A' : '#fff'}" stroke="#00873A" stroke-width="${.2 * k}" ${i ? '' : 'data-sp-close="1"'}/>`).join('');
+  if (trace) s += `<polyline points="${pts(trace.pts)}" fill="none" stroke="#0B6B3A" stroke-width="${.25 * k}" stroke-dasharray="${k} ${.5 * k}"/>` + trace.pts.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="${(i ? .6 : .9) * k}" fill="${i ? '#0B6B3A' : '#fff'}" stroke="#0B6B3A" stroke-width="${.2 * k}" ${i ? '' : 'data-sp-close="1"'}/>`).join('');
   if (pick) s += pick.pts.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="${.7 * k}" fill="#e67e22" stroke="#fff" stroke-width="${.2 * k}"/>`).join('') + (pick.pts.length === 2 ? `<line x1="${pick.pts[0][0]}" y1="${pick.pts[0][1]}" x2="${pick.pts[1][0]}" y2="${pick.pts[1][1]}" stroke="#e67e22" stroke-width="${.25 * k}"/>` : '');
   svg.innerHTML = s;
   const shape = selShape(); $('#spType').disabled = !shape || shape.type === 'lot' || sel?.kind === 'tree'; if (shape && shape.type !== 'lot') $('#spType').value = shape.type; $('#spDel').disabled = !sel || sel.kind === 'lot';
@@ -84,13 +87,13 @@ function render() {
 }
 const selShape = () => !sel || !S ? null : sel.kind === 'lot' ? { type: 'lot', pts: S.lot } : sel.kind === 'tree' ? null : S.shapes.find(s => s.id === sel.id);
 const selPts = () => sel?.kind === 'lot' ? S.lot : selShape()?.pts;
-function handles(k) { if (!sel) return ''; if (sel.kind === 'tree') { const t = S.trees.find(t => t.id === sel.id); if (!t) return ''; return `<circle cx="${t.x}" cy="${t.z}" r="${t.r}" fill="none" stroke="#00873A" stroke-width="${.25 * k}"/><circle class="sp-h" data-h="r" cx="${t.x + t.r}" cy="${t.z}" r="${.9 * k}" fill="#fff" stroke="#00873A" stroke-width="${.25 * k}"/>`; }
-  const P = selPts(); if (!P) return ''; return `<polygon points="${pts(P)}" fill="rgba(0,135,58,.08)" stroke="#00873A" stroke-width="${.25 * k}" class="sp-selbody" data-body="1"/>` + P.map((p, i) => `<circle class="sp-h" data-h="${i}" cx="${p[0]}" cy="${p[1]}" r="${.9 * k}" fill="#fff" stroke="#00873A" stroke-width="${.25 * k}"/>`).join('')
-    + edges(P).map(e => `<circle class="sp-mid" data-mid="${e.i}" cx="${e.mid[0]}" cy="${e.mid[1]}" r="${.55 * k}" fill="#00873A" opacity=".55"/>`).join(''); }
+function handles(k) { if (!sel) return ''; if (sel.kind === 'tree') { const t = S.trees.find(t => t.id === sel.id); if (!t) return ''; return `<circle cx="${t.x}" cy="${t.z}" r="${t.r}" fill="none" stroke="#0B6B3A" stroke-width="${.25 * k}"/><circle class="sp-h" data-h="r" cx="${t.x + t.r}" cy="${t.z}" r="${.9 * k}" fill="#fff" stroke="#0B6B3A" stroke-width="${.25 * k}"/>`; }
+  const P = selPts(); if (!P) return ''; return `<polygon points="${pts(P)}" fill="rgba(11,107,58,.08)" stroke="#0B6B3A" stroke-width="${.25 * k}" class="sp-selbody" data-body="1"/>` + P.map((p, i) => `<circle class="sp-h" data-h="${i}" cx="${p[0]}" cy="${p[1]}" r="${.9 * k}" fill="#fff" stroke="#0B6B3A" stroke-width="${.25 * k}"/>`).join('')
+    + edges(P).map(e => `<circle class="sp-mid" data-mid="${e.i}" cx="${e.mid[0]}" cy="${e.mid[1]}" r="${.55 * k}" fill="#0B6B3A" opacity=".55"/>`).join(''); }
 // tappable dimension labels for the selected shape (or the lot when nothing is selected)
 function dimHits(k) { const P = sel ? selPts() : S.lot; if (!P) return ''; const c = centroid(P);
   return edges(P).filter(e => e.len >= 3).map(e => { const nx = -(e.b[1] - e.a[1]) / e.len, nz = (e.b[0] - e.a[0]) / e.len, sgn = (e.mid[0] - c[0]) * nx + (e.mid[1] - c[1]) * nz > 0 ? 1 : -1, off = (sel ? 3.6 : 2.4) * sgn, x = e.mid[0] + nx * off, z = e.mid[1] + nz * off;
-    return `<g class="sp-dimhit" data-edge="${e.i}" role="button" tabindex="0" aria-label="Edge ${fmtFt(e.len)}, tap to type a length"><rect x="${x - 2.6 * k}" y="${z - 1 * k}" width="${5.2 * k}" height="${2 * k}" rx="${.6 * k}" fill="${sel ? '#00873A' : 'transparent'}" opacity="${sel ? .92 : 1}"/>${sel ? `<text x="${x}" y="${z + .45 * k}" text-anchor="middle" font-size="${1.15 * k}" fill="#fff" font-weight="700">${fmtFt(e.len)}</text>` : ''}</g>`; }).join(''); }
+    return `<g class="sp-dimhit" data-edge="${e.i}" role="button" tabindex="0" aria-label="Edge ${fmtFt(e.len)}, tap to type a length"><rect x="${x - 2.6 * k}" y="${z - 1 * k}" width="${5.2 * k}" height="${2 * k}" rx="${.6 * k}" fill="${sel ? '#0B6B3A' : 'transparent'}" opacity="${sel ? .92 : 1}"/>${sel ? `<text x="${x}" y="${z + .45 * k}" text-anchor="middle" font-size="${1.15 * k}" fill="#fff" font-weight="700">${fmtFt(e.len)}</text>` : ''}</g>`; }).join(''); }
 // ---------- edit ops ----------
 const snapshot = () => JSON.stringify(S);
 function commit(prev) { undo.push(prev); if (undo.length > 80) undo.shift(); redo = []; render(); }
@@ -139,7 +142,7 @@ function wire() {
     else if (drag.kind === 'r') { const t = S.trees.find(t => t.id === sel.id); t.r = Math.max(1, +dist([t.x, t.z], p).toFixed(1)); }
     else if (drag.kind === 'move') { const dx = p[0] - drag.last[0], dz = p[1] - drag.last[1]; drag.last = p; if (sel.kind === 'tree') { const t = S.trees.find(t => t.id === sel.id); t.x += dx; t.z += dz; } else { const P = selPts(); P.forEach(q => { q[0] += dx; q[1] += dz; }); } }
     render(); });
-  const up = () => { if (drag?.kind === 'pan') { drag = null; return; } if (drag?.moved) { if (drag.kind === 'move') { const P = selPts(); if (P && snap) P.forEach(q => { q[0] = +q[0].toFixed(2); q[1] = +q[1].toFixed(2); }); } commit(drag.prev); } drag = null; };
+  const up = () => { if (drag?.kind === 'pan') { drag = null; return; } if (drag?.moved && drag.kind === 'v' && selfIntersects(selPts())) { S = JSON.parse(drag.prev); drag = null; render(); hint('▲ Lines cross. That corner was put back. Move it so the edges don\'t cross.'); return; } if (drag?.moved) { if (drag.kind === 'move') { const P = selPts(); if (P && snap) P.forEach(q => { q[0] = +q[0].toFixed(2); q[1] = +q[1].toFixed(2); }); } commit(drag.prev); } drag = null; };
   svg.addEventListener('pointerup', up); svg.addEventListener('pointercancel', () => { drag = null; });
   d.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); d.querySelector(`[data-sp=${e.shiftKey ? 'redo' : 'undo'}]`).click(); } if ((e.key === 'Delete' || e.key === 'Backspace') && sel && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) d.querySelector('[data-sp=del]').click(); });
 }
@@ -158,6 +161,7 @@ function startTrace(type) { if (!S) S = { v: 1, source: layers.survey ? 'survey'
   trace = { type, pts: [] }; sel = null; collapseSurvey(); render(); hint(`Tracing ${TYPES[type].name.toLowerCase()}: tap each corner, then tap the first point or Finish.`); showFinish(true); }
 function showFinish(on) { let b = $('#spFinish'); if (on && !b) { $('#spStage').insertAdjacentHTML('beforeend', '<button class="btn btn--primary btn--sm sp__finish" id="spFinish" type="button" data-sp="finish">Finish shape</button>'); } else if (!on && b) b.remove(); }
 function finishTrace() { if (!trace) return; showFinish(false); const t = trace; trace = null; if (t.pts.length < 3) { render(); return hint('A shape needs at least 3 corners.'); }
+  if (selfIntersects(t.pts)) { render(); return hint('▲ Lines cross. Trace the corners in order around the shape and try again.'); }
   const prev = snapshot(), src = layers.survey ? 'survey' : undefined;
   if (t.type === 'lot') { S.lot = t.pts; S.lotEstimated = false; if (src) { S.source = 'survey'; S.approx = false; } sel = { kind: 'lot' }; }
   else { const id = sid(); S.shapes.push({ id, type: t.type, pts: ['house', 'pool'].includes(t.type) ? rectilinear(t.pts, .5) : t.pts, src }); sel = { kind: 'shape', id }; }
@@ -166,7 +170,7 @@ function finishTrace() { if (!trace) return; showFinish(false); const t = trace;
 const collapseSurvey = () => { const d = document.querySelector('.sp__sv'); if (d) d.open = false; };
 function startScale() { collapseSurvey(); const key = layers.survey ? 'survey' : layers.drone ? 'drone' : layers.aerial ? 'aerial' : null; if (!key) return hint('Load a survey or drone photo first.');
   pick = { pts: [], next() { if (pick.pts.length === 2 && pendingLen) { const v = pendingLen; pendingLen = null; pick.done(v); } else if (pick.pts.length === 2) { pick.wantLen = true; $('#spLen').hidden = false; $('#spLenIn').value = ''; $('#spLenIn').focus(); hint('Type the real length between the two points (ft), e.g. from the scale bar or a labeled dimension.'); } else hint('Now tap the other end.'); },
-    done(v) { const L = layers[key], d = dist(pick.pts[0], pick.pts[1]); if (d > 0) { const k = v / d; L.ftPerPx *= k; L.cx = (L.cx || 0) * k; L.cz = (L.cz || 0) * k; if (S) scaleGeom(k, key); } pick = null; render(); hint(`Scale set: ${fmtFt(v)} between your two points.`); } };
+    done(v) { const L = layers[key], d = dist(pick.pts[0], pick.pts[1]); if (d > 0) { const k = v / d; L.ftPerPx *= k; L.cx = (L.cx || 0) * k; L.cz = (L.cz || 0) * k; L.scaleSet = true; L.scaleAssumed = false; if (S) scaleGeom(k, key); } pick = null; render(); hint(`Scale set: ${fmtFt(v)} between your two points.`); } };
   render(); hint('Tap one end of a known length (scale bar or a labeled line).'); }
 function scaleGeom(k, key) { if (!S) return; const f = p => [+(p[0] * k).toFixed(2), +(p[1] * k).toFixed(2)]; const mine = s => key === 'aerial' || s.src === key || (key === 'survey' && s.src === 'survey');
   if (key !== 'aerial' && S.source === key) S.lot = S.lot.map(f); S.shapes.filter(mine).forEach(s => s.pts = s.pts.map(f)); render(); }
@@ -223,8 +227,9 @@ function exifTag(buf, tag) { const v = new DataView(buf); if (v.getUint16(0) !==
       const scan = (ifd) => { const n = g16(t + ifd); for (let i = 0; i < n; i++) { const e = t + ifd + 2 + i * 12, id = g16(e); if (id === tag) return g16(e + 8); if (id === 0x8769) { const r = scan(g32(e + 8)); if (r) return r; } } return null; }; return scan(g32(t + 4)); } o += 2 + L; } return null; }
 async function dronePhoto(file) { if (!file) return; const buf = await file.arrayBuffer(), url = await new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(file); }), im = new Image(); im.src = url; await im.decode();
   const W = im.naturalWidth, H = im.naturalHeight, sc = droneScale(buf, W); const ftPerPx = sc ? sc.ftPerPx : 120 / Math.max(W, H);
-  layers = { drone: { url, W, H, ftPerPx, cx: 0, cz: 0, rot: 0 } }; show.drone = true; manual(); S.source = 'drone'; S.attribution = 'Your drone photo'; delete layers.aerial; setSrc(); render();
-  hint(sc ? `Scale from the photo: ${sc.alt} m altitude, ${sc.f35} mm (35 mm equiv.). Check one known length with Set scale.` : 'No altitude in this photo. Tap Set scale and mark one length you know (e.g. the garage door).'); }
+  // Overnight B17: without EXIF altitude the photo is assumed 120 ft across — areas look real until Set scale. Flag it.
+  layers = { drone: { url, W, H, ftPerPx, cx: 0, cz: 0, rot: 0, scaleSet: !!sc, scaleAssumed: !sc } }; show.drone = true; manual(); S.source = 'drone'; S.attribution = 'Your drone photo'; delete layers.aerial; setSrc(); render();
+  hint(sc ? `Scale from the photo: ${sc.alt} m altitude, ${sc.f35} mm (35 mm equiv.). Check one known length with Set scale.` : '≈ Scale not set — assuming the photo is 120 ft wide. Areas are approximate until you tap Set scale and mark one known length (e.g. the garage door).'); }
 // ---------- done ----------
 function done() { if (!S) return; clipToLot(S); const design = siteToDesign(S, opts.base || {}); const d = $('#siteSheet'); d.close(); opts.onDone?.(JSON.parse(JSON.stringify(S)), design, layers); }
 export const state = () => ({ site: S, layers, cache });

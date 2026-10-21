@@ -2,6 +2,10 @@
 // Classic-script globals used here (declared with const/let at top level, so reachable by name from this
 // module, which runs after them): PLANTS, PLANT_SIZE (data.js), MATERIALS, priceProvider (prices.js), state, esc, go (app.js).
 import { ensureIrrigationItems } from './contractor/irrigation-takeoff.js';
+import { budgetValue } from './contractor/parse-budget.js';
+import { STATE_SALES_TAX } from './contractor/data/state-sales-tax.js';
+import { depositDefault } from './contractor/data/state-deposit.js';
+import { zip3ToState } from './marketplace/data/zip3-state.js';
 import { takeoff, toCSV } from './contractor/takeoff.js';
 import { createPriceBook, seedFromProvider, setItem, setPlantPrice, setSettings, loadFromStorage, saveToStorage } from './contractor/pricebook.js';
 import { generateBid, marginPctToMarkupPct } from './contractor/bid.js';
@@ -23,7 +27,7 @@ let design = null, take = null, bid = null, priced = null, tier = profile.tier |
 const getP = path => path.split('.').reduce((o, k) => o && o[k], profile);
 const setP = (path, v) => { const ks = path.split('.'); let o = profile; ks.slice(0, -1).forEach(k => o = o[k] = o[k] || {}); o[ks.at(-1)] = v; };
 $$('#proProfile [data-p]').forEach(i => { const v = getP(i.dataset.p); if (v != null) i.value = v;
-  i.oninput = () => { setP(i.dataset.p, i.value); localStorage.setItem(PKEY, JSON.stringify(profile)); $('#proSaved').textContent = 'Saved on this device.'; if (i.dataset.p === 'project.budget' && bid) renderBid(); }; });
+  i.oninput = () => { setP(i.dataset.p, i.value); $('#proSaved').textContent = lsSet(PKEY, JSON.stringify(profile)) ? 'Saved on this device.' : "Couldn't save on this device."; if (i.dataset.p === 'project.budget' && bid) renderBid(); }; });
 const ico = n => `<svg class="ico" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 const hexRgb = h => { const m = /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(h || ''); return m ? m.slice(1).map(x => parseInt(x, 16)) : [46, 94, 62]; };
 
@@ -35,14 +39,19 @@ async function loadDesign() {
 }
 // Seed ZIP prices once per ZIP, for BOTH the homeowner estimate and the Pro bid, so the two always use the same book.
 let seededZip = null, seeding = null;
+// Overnight B4: tax was 0% everywhere. Default to the job state's base sales-tax rate on materials (Tax Foundation, July 2026)
+// unless the contractor typed their own rate (taxSource 'user'). Local/district taxes are NOT included; the UI says so.
+function applyStateTax(zip) { const st = (state.place?.st) || zip3ToState[String(zip || '').slice(0, 3)] || ''; const s = book.settings;
+  if (s.taxSource === 'user' || !st || !(st in STATE_SALES_TAX)) return; const r = STATE_SALES_TAX[st];
+  if (s.taxPct !== r || s.taxState !== st) { setSettings(book, { taxPct: r, taxOn: 'materials', taxState: st, taxSource: 'state-default' }); saveToStorage(book); } }
 async function bookReady() {
   if (seededZip === (state.zip || '')) return book;
   const z = state.zip || ''; seeding = seeding && seeding.z === z ? seeding : { z, p: seedFromProvider(book, priceProvider, z).then(() => { saveToStorage(book); seededZip = z; }) };
-  await seeding.p; ensureIrrigationItems(book); return book;
+  await seeding.p; ensureIrrigationItems(book); applyStateTax(z); return book;
 }
 async function refresh() {
   $('#proSrc').textContent = 'Reading the site plan…';
-  const { d, src } = await loadDesign(); design = d;
+  const { d, src } = await loadDesign(); design = d; document.querySelectorAll('#proLawn,#proLawnTake').forEach(x => x.checked = !!d.includeLawn);
   const walls = d.items.filter(i => i.kind === 'wall').length, g = d.items.find(i => i.kind === 'grade');
   $('#proSrc').textContent = `From the ${src}: ${d.yard.w} × ${d.yard.d} ft yard, ${d.items.filter(i => i.kind === 'plant').length} plants, ${d.items.filter(i => !['plant', 'grade'].includes(i.kind)).length} features${walls ? ` (${walls} wall${walls > 1 ? 's' : ''})` : ''}${g ? `, grading ${g.cutCuYd} cut / ${g.fillCuYd} fill cu yd` : ''}.`;
   await bookReady();
@@ -50,7 +59,7 @@ async function refresh() {
 }
 function recompute() {
   if (!design) return;
-  take = buildTakeoff(design, { catalog: { plants: PLANTS, plant3d: PLANT_SIZE }, includeLawn: $('#proLawn').checked });
+  take = buildTakeoff(design, { catalog: { plants: PLANTS, plant3d: PLANT_SIZE }, includeLawn: !!design.includeLawn });
   if (irr && !take.irrigation) { const have = new Set(take.lines.map(l => l.key)); take.lines.push(...irr.lines.filter(l => !have.has(l.key) && book.items[l.key]).map(l => ({ ...l, name: book.items[l.key].name, basis: 'count', waste: 0, irrigation: true }))); }
   bid = generateBid(take, book, { tiers: true, autoFees: book.settings.autoFees !== false });
   // headline = the single pricing path (same as proBid().rounded.total and the homeowner "hire a pro" total)
@@ -70,12 +79,16 @@ function renderTake() {
     `<tr><td>${esc(p.name)}<div class="small"><i>${esc(p.sci)}</i>${p.native ? ' · ' + esc(p.native) : ''}</div></td><td>${esc(p.container)}</td><td class="n"><b>${p.count}</b></td><td class="n">${p.matureH} × ${p.matureW} ft</td></tr>`).join('')
     : '<tr><td colspan="4" class="small">No plants yet.</td></tr>');
 }
-$('#proLawn').onchange = recompute;
+// Run 5 (R5-2): the lawn toggle lives on the design (per job, shared with homeownerEstimate). Two checkboxes mirror it.
+document.querySelectorAll('#proLawn,#proLawnTake').forEach(c => c.onchange = () => { const on = c.checked; document.querySelectorAll('#proLawn,#proLawnTake').forEach(x => x.checked = on);
+  if (design) design.includeLawn = on; if (window.jobsApi?.current?.()?.design) window.dispatchEvent(new CustomEvent('yardplan:lawn', { detail: on })); else { window.planApi?.apply?.({ ...window.planApi.serialize(), includeLawn: on }); recompute(); } });
 $('#proRefresh').onclick = refresh;
 $('#proCsv').onclick = () => { if (!take) return; const a = document.createElement('a'); a.download = 'yardplan-takeoff.csv'; a.href = URL.createObjectURL(new Blob([toCSV(take)], { type: 'text/csv' })); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); };
 // ---------- price book ----------
 function renderBook() {
   const s = book.settings; $$('[data-s]').forEach(i => { if (document.activeElement !== i) i.value = s[i.dataset.s] ?? 0; });
+  { const tn = $('#taxNote'); if (tn) tn.textContent = s.taxSource === 'user' ? 'Your rate, on ' + (s.taxOn === 'all' ? 'the whole job.' : 'materials.') : s.taxState ? `${s.taxState} statewide base rate on materials (Tax Foundation, July 2026). Add your city/county district rate, and check whether ${s.taxState} taxes landscaping labor.` : 'Set your sales tax rate.'; }
+  { const dn = $('#depNote'), st = (state.place?.st) || zip3ToState[String(state.zip || '').slice(0, 3)] || ''; if (dn) dn.textContent = st === 'CA' || !st ? '' : 'Proposal deposit: ' + depositDefault(st, 0).note; } // v19 (Austin #2)
   $('#proDiff').value = typeof s.siteDifficulty === 'string' ? s.siteDifficulty : ({ 1: 'easy', 1.25: 'moderate', 1.5: 'hard' }[s.siteDifficulty] || 'easy');
   $('#proFees').checked = s.autoFees !== false; $('#proSplit').checked = !!s.markups; $('#proMarkups').hidden = !s.markups;
   $$('[data-m]').forEach(i => { if (document.activeElement !== i) i.value = s.markups ? s.markups[i.dataset.m] ?? s.markupPct : s.markupPct; });
@@ -89,7 +102,7 @@ function renderBook() {
 }
 $('#proBook').addEventListener('change', e => { const b = e.target.dataset.b; if (!b) return; const [kind, key, field] = b.split(':'); const v = Math.max(0, +e.target.value || 0);
   if (kind === 'm') setItem(book, key, { [field]: v }); else setPlantPrice(book, key, { [field]: v }); saveToStorage(book); recompute(); });
-$$('[data-s]').forEach(i => i.onchange = () => { setSettings(book, { [i.dataset.s]: Math.max(0, +i.value || 0) }); saveToStorage(book); recompute(); });
+$$('[data-s]').forEach(i => i.onchange = () => { setSettings(book, { [i.dataset.s]: Math.max(0, Math.min(i.dataset.s === 'taxPct' ? 20 : 1e6, +i.value || 0)), ...(i.dataset.s === 'taxPct' ? { taxSource: 'user' } : {}) }); saveToStorage(book); recompute(); });
 const setS = patch => { setSettings(book, patch); saveToStorage(book); recompute(); };
 $('#proDiff').onchange = e => setS({ siteDifficulty: e.target.value });
 $('#proFees').onchange = e => setS({ autoFees: e.target.checked });
@@ -119,7 +132,7 @@ function bidView() {
   const tierTotal = t => t.id === 'good' && priced ? priced.total : Math.round(t.totals.total);
   const total = sel.id === 'good' && priced ? priced.total : Math.round(T.total), sumRows = sumRowsFor(T);
   const sumR = roundLines(sumRows.map(r => r[1]), total), lineR = roundLines(sel.lines.map(l => l.total));
-  const budget = Math.round(+String((profile.project || {}).budget || '').replace(/[^\d.]/g, '')) || 0;
+  const budget = budgetValue((profile.project || {}).budget);
   let san = []; try { san = priceSanityChecks(take, bid, { tierId: sel.id }); } catch (e) { }
   return { tier: sel.id, name: sel.name, total, budget, tiers: bid.tiers.map(t => ({ id: t.id, name: t.name, total: tierTotal(t) })),
     lines: sel.lines.map((l, i) => ({ key: l.key, category: l.category, description: l.description, qty: l.qty, unit: l.unit, unitCost: l.unitCost, laborUnit: l.laborUnit, laborHours: l.laborHours, total: lineR[i] })),
@@ -127,13 +140,18 @@ function bidView() {
 }
 // v16: edit one bid line's price from the Jobs bid screen. Saves to the price book (same storage as the #proBook table).
 function editLine(key, { unitCost, labor }) {
-  const v = x => Math.max(0, +x || 0);
+  const v = x => Math.min(MAX_UNIT, Math.max(0, +x || 0));
   if (key.startsWith('fee:')) { const f = { 'fee:mobilization': 'mobilizationFee', 'fee:delivery': 'deliveryFeeBulk', 'fee:dump': 'dumpFeePerLoad' }[key]; if (f && unitCost != null) setS({ [f]: v(unitCost) }); return; }
   if (key.startsWith('plant:')) { const p = take && take.plants.find(x => 'plant:' + x.id === key); if (!p) return; const e = book.plants[p.container] || {};
     setPlantPrice(book, p.container, { ...(unitCost != null ? { unitCost: v(unitCost) } : {}), ...(labor != null ? { [e.laborPerUnit != null ? 'laborPerUnit' : 'laborHoursPerUnit']: v(labor) } : {}) }); }
   else { const e = book.items[key]; if (!e) return; setItem(book, key, { ...(unitCost != null ? { unitCost: v(unitCost) } : {}), ...(labor != null ? { [e.laborPerUnit != null ? 'laborPerUnit' : 'laborHoursPerUnit']: v(labor) } : {}) }); }
   saveToStorage(book); recompute();
 }
+// Overnight B7: reference prices for sanity checks on line edits (the shipped default book, not the user's edits).
+let refBook = null; const MAX_UNIT = 100000, MAX_LABOR = 100000;
+function lineRef(key) { refBook ||= createPriceBook({}); if (key.startsWith('fee:')) return null;
+  if (key.startsWith('plant:')) { const p = take && take.plants.find(x => 'plant:' + x.id === key); const e = p && refBook.plants[p.container]; return e ? { unitCost: +e.unitCost || 0 } : null; }
+  const e = refBook.items[key]; return e ? { unitCost: +e.unitCost || 0 } : null; }
 function lineEntry(key) {
   if (key.startsWith('plant:')) { const p = take && take.plants.find(x => 'plant:' + x.id === key); const e = p && book.plants[p.container]; return e ? { unitCost: +e.unitCost || 0, labor: e.laborPerUnit != null ? e.laborPerUnit : +e.laborHoursPerUnit || 0, laborUnit: e.laborPerUnit != null ? '$' : 'h', unit: p.container + ' plant' } : null; }
   if (key.startsWith('fee:')) return null;
@@ -142,11 +160,11 @@ function lineEntry(key) {
 // v16: a job supplies client / project / tier instead of the single global slot (business stays global).
 function setJob({ client = {}, project = {}, tier: t } = {}) {
   profile.client = { ...client }; profile.project = { ...project }; if (t) { tier = t; profile.tier = t; }
-  localStorage.setItem(PKEY, JSON.stringify(profile));
+  lsSet(PKEY, JSON.stringify(profile));
   $$('#proProfile [data-p]').forEach(i => { const v = getP(i.dataset.p); i.value = v != null ? v : (i.type === 'color' ? '#2e5e3e' : ''); });
   if (bid) { renderBid(); renderImgs(); window.dispatchEvent(new Event('yardplan:bid')); }
 }
-function setBusiness(patch) { profile.business = { ...(profile.business || {}), ...patch }; localStorage.setItem(PKEY, JSON.stringify(profile));
+function setBusiness(patch) { profile.business = { ...(profile.business || {}), ...patch }; lsSet(PKEY, JSON.stringify(profile));
   $$('#proProfile [data-p^="business."]').forEach(i => { const v = getP(i.dataset.p); if (v != null) i.value = v; }); }
 function renderBid() {
   const sel = bid.tiers.find(t => t.id === tier) || bid.tiers[0], T = sel.totals;
@@ -156,8 +174,8 @@ function renderBid() {
   $('#proTiers').innerHTML = bid.tiers.map(t => `<button data-t="${t.id}" class="${t.id === sel.id ? 'on' : ''}"><small>${esc(t.name)}</small><b>${money(tierTotal(t))}</b></button>`).join('');
   const hl = $('#proHeadline') || $('#proTiers').insertAdjacentElement('beforebegin', Object.assign(document.createElement('p'), { id: 'proHeadline', className: 'small' }));
   hl.innerHTML = `Bid total <b>${money(priced ? priced.total : T.total)}</b>. This is the same number the homeowner sees for "Hire a pro". Better and Best are optional upgrades.`;
-  const cb = Math.round(+String((profile.project || {}).budget || '').replace(/[^\d.]/g, '')) || 0, tb = $('#proTierBudget') || $('#proTiers').insertAdjacentElement('afterend', Object.assign(document.createElement('p'), { id: 'proTierBudget', className: 'small' }));
-  tb.innerHTML = cb ? `Client budget <b>${money(cb)}</b> · ${bid.tiers.map(t => { const v = tierTotal(t); return `${esc(t.name)} ${v <= cb ? `<span class="ok">fits (${money(cb - v)} under)</span>` : `<span class="over">${money(v - cb)} over</span>`}`; }).join(' · ')}` : 'Add the client\'s budget below (optional) to see which option fits.';
+  const cb = budgetValue((profile.project || {}).budget), tb = $('#proTierBudget') || $('#proTiers').insertAdjacentElement('afterend', Object.assign(document.createElement('p'), { id: 'proTierBudget', className: 'small' }));
+  tb.innerHTML = cb ? `Client budget <b>${money(cb)}</b> · ${bid.tiers.map(t => { const v = tierTotal(t); return `${esc(t.name)} ${v <= cb ? `<span class="ok">✓ fits (${money(cb - v)} under)</span>` : `<span class="over">▲ ${money(v - cb)} over</span>`}`; }).join(' · ')}` : 'Add the client\'s budget below (optional) to see which option fits.';
   const totR = sel.id === 'good' && priced ? priced.total : Math.round(T.total);
   const sumRows = sumRowsFor(T);
   const sumR = roundLines(sumRows.map(r => r[1]), totR), lineR = roundLines(sel.lines.map(l => l.total));
@@ -170,7 +188,7 @@ function renderBid() {
   let san = []; try { san = priceSanityChecks(take, bid, { tierId: sel.id }); } catch (e) { console.warn(e); }
   $('#proSanity').innerHTML = san.map(c => `<li class="${c.status === 'ok' ? 'info' : 'warn'}"><span>${ico(c.status === 'ok' ? 'check' : 'triangle-alert')}</span><span>${esc(c.message)}</span></li>`).join('');
 }
-const pickTier = e => { const b = e.target.closest('button[data-t]'); if (!b) return; tier = b.dataset.t; profile.tier = tier; localStorage.setItem(PKEY, JSON.stringify(profile)); renderBid(); renderImgs(); window.dispatchEvent(new Event('yardplan:bid')); };
+const pickTier = e => { const b = e.target.closest('button[data-t]'); if (!b) return; tier = b.dataset.t; profile.tier = tier; lsSet(PKEY, JSON.stringify(profile)); renderBid(); renderImgs(); window.dispatchEvent(new Event('yardplan:bid')); };
 $('#proTier').onclick = pickTier; $('#proTiers').onclick = pickTier;
 // ---------- compliance ----------
 function renderWarn() {
@@ -180,7 +198,7 @@ function renderWarn() {
 // ---------- proposal ----------
 function renderImgs() {
   const ph = window.overlayApi && window.overlayApi.hasPhoto(), n = ph ? window.overlayApi.items().length : 0;
-  $('#proImgs').innerHTML = `<li class="${ph ? 'ok' : ''}">${ph ? '✓' : '○'} Before / after photo ${ph ? `(your photo with ${n} plant${n === 1 ? '' : 's'})` : '— optional: upload a photo and place plants in the <a href="#" data-go="overlay">Photo</a> tab'}</li>
+  $('#proImgs').innerHTML = `<li class="${ph ? 'ok' : ''}">${ph ? '✓' : '○'} Before / after photo ${ph ? `(your photo with ${n} plant${n === 1 ? '' : 's'})` : '— optional: add the client\'s photo in the <a href="#" data-jgo="2">Photo and plan</a> step'}</li>
     <li class="${window.renderHook?.lastResult && !window.renderHook.lastResult.mock ? 'ok' : ''}">${window.renderHook?.lastResult && !window.renderHook.lastResult.mock ? '✓' : '○'} AI concept render of the client's yard</li><li class="ok">✓ Top-down site plan with dimensions</li><li class="ok">✓ Scope &amp; price for the <b>${esc(tier[0].toUpperCase() + tier.slice(1))}</b> option, plus the options table</li><li class="ok">✓ ${warnings.filter(w => w.level !== 'info').length} permit/safety flag(s) and standard notices</li>`;
 }
 let jsPdfP;
@@ -192,7 +210,7 @@ function planShot() {
   if (!window.planApi) return Promise.resolve(null);
   const sig = designSig(); if (shotCache && shotCache.sig === sig) return Promise.resolve(shotCache.img);
   if (shotP) return shotP;
-  return shotP = window.planApi.capture(1400, 'image/jpeg', .85).then(([img]) => { shotCache = { sig, img }; shotP = null; return img; }, e => { shotP = null; throw e; });
+  return shotP = window.planApi.capture(1400, 'image/jpeg', .85, { spacing: true }).then(([img]) => { shotCache = { sig, img }; shotP = null; return img; }, e => { shotP = null; throw e; });
 }
 const prefetchShots = () => (window.requestIdleCallback || (f => setTimeout(f, 300)))(() => planShot().catch(e => console.warn(e)), { timeout: 2000 });
 async function makeProposal() {
@@ -223,9 +241,9 @@ function addIrrigation(plan) {
 // E-sign record retention (days; 0 = keep until deleted), sent as retentionDays when a proposal is shared for e-sign.
 const RKEY = 'yardplan.esign.retentionDays';
 $('#proRetention').value = localStorage.getItem(RKEY) ?? '2557';
-$('#proRetention').onchange = e => localStorage.setItem(RKEY, e.target.value);
+$('#proRetention').onchange = e => lsSet(RKEY, e.target.value);
 const esignRetentionDays = () => +$('#proRetention').value;
-window.proApi = { bidView, editLine, lineEntry, setJob, setBusiness, profile: () => JSON.parse(JSON.stringify(profile)), setTier: t => { tier = t; profile.tier = t; localStorage.setItem(PKEY, JSON.stringify(profile)); if (bid) { renderBid(); renderImgs(); window.dispatchEvent(new Event('yardplan:bid')); } }, recompute, bookReady, total: () => priced?.total ?? null, shotsReady: () => !!shotCache && shotCache.sig === designSig(), esignRetentionDays, addIrrigation, irrigation: () => irr, refresh, makeProposal, book: () => book, bid: () => bid, take: () => take, warnings: () => warnings };
+window.proApi = { bidView, editLine, lineEntry, lineRef, setJob, setBusiness, profile: () => JSON.parse(JSON.stringify(profile)), setTier: t => { tier = t; profile.tier = t; lsSet(PKEY, JSON.stringify(profile)); if (bid) { renderBid(); renderImgs(); window.dispatchEvent(new Event('yardplan:bid')); } }, recompute, bookReady, total: () => priced?.total ?? null, shotsReady: () => !!shotCache && shotCache.sig === designSig(), esignRetentionDays, addIrrigation, irrigation: () => irr, refresh, makeProposal, book: () => book, bid: () => bid, take: () => take, warnings: () => warnings };
 window.onProShow = () => { refresh(); prefetchShots(); };
 window.addEventListener('yardplan:design', () => { if (document.body.dataset.mode === 'pro') prefetchShots(); });
 if ($('#tab-pro').classList.contains('active')) refresh();

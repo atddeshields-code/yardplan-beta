@@ -1,3 +1,4 @@
+import { syncWalk } from './walkway.js';
 // siteplan/core.js — pure geometry + aerial classification for the 2D auto site plan (no DOM, node-testable).
 // Units: feet. Plan coordinates: x to the right (east when north = 0), z down (south). Polygons: [[x, z], ...].
 export const FT_PER_M = 3.28084;
@@ -11,6 +12,13 @@ export const TYPES = {
 };
 export const AREA_TYPES = ['house', 'driveway', 'patio', 'pool', 'lawn', 'bed', 'gravel', 'easement'];
 // ---------- geometry ----------
+/** selfIntersects(P): true when two non-adjacent edges cross (bow-tie). Overnight B10. */
+export function selfIntersects(P) { const n = P?.length || 0; if (n < 4) return false;
+  const cr = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { if (j === i + 1 || (i === 0 && j === n - 1)) continue;
+    const a = P[i], b = P[(i + 1) % n], c = P[j], d = P[(j + 1) % n], d1 = cr(c, d, a), d2 = cr(c, d, b), d3 = cr(a, b, c), d4 = cr(a, b, d);
+    if (((d1 > 1e-9 && d2 < -1e-9) || (d1 < -1e-9 && d2 > 1e-9)) && ((d3 > 1e-9 && d4 < -1e-9) || (d3 < -1e-9 && d4 > 1e-9))) return true; }
+  return false; }
 export const area = P => Math.abs(P.reduce((s, [x, z], i) => { const [x2, z2] = P[(i + 1) % P.length]; return s + x * z2 - x2 * z; }, 0) / 2);
 export const perimeter = P => P.reduce((s, p, i) => s + dist(p, P[(i + 1) % P.length]), 0);
 export const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -48,10 +56,12 @@ export const projector = (lat0, lon0) => { const ky = 111320 * FT_PER_M, kx = ky
 // ---------- bearings (surveys) ----------
 /** parse "N 12°30' E 85.00'" / "S12-30-15W 120.5" → { az (radians, clockwise from north), len (ft) } */
 export function parseCall(s) {
-  const m = /([NS])\s*(\d+(?:\.\d+)?)\s*(?:°|d|-|\s)\s*(?:(\d+(?:\.\d+)?)\s*(?:'|′|m|-|\s)\s*)?(?:(\d+(?:\.\d+)?)\s*(?:"|″|s)?\s*)?([EW])\s*,?\s*(\d+(?:\.\d+)?)/i.exec(String(s).replace(/[’]/g, "'"));
-  if (!m) return null; const deg = +m[2] + (+m[3] || 0) / 60 + (+m[4] || 0) / 3600; if (deg > 90) return null;
+  const m = /([NS])\s*(\d+(?:\.\d+)?)\s*(?:°|d|-|\s)\s*(?:(\d+(?:\.\d+)?)\s*(?:'|′|m|-|\s)\s*)?(?:(\d+(?:\.\d+)?)\s*(?:"|″|s)?\s*)?([EW])\s*,?\s*(\d+(?:\.\d+)?)\s*(m(?:et(?:er|re)s?)?\b|ft\b|feet\b|'|′)?/i.exec(String(s).replace(/[’]/g, "'"));
+  if (!m) return null; if ((+m[3] || 0) >= 60 || (+m[4] || 0) >= 60) return null; const deg = +m[2] + (+m[3] || 0) / 60 + (+m[4] || 0) / 3600; if (deg > 90) return null;
   const ns = m[1].toUpperCase(), ew = m[5].toUpperCase(); let az = ns === 'N' ? (ew === 'E' ? deg : 360 - deg) : (ew === 'E' ? 180 - deg : 180 + deg);
-  return { az: az * Math.PI / 180, len: +m[6] };
+  // Run 5 (R5-5): "25.9m" / "25.9 metres" was read as 25.9 ft (lot 3.28× too small). Metres convert; ft/'/none = feet.
+  const metric = /^m/i.test(m[7] || '');
+  return { az: az * Math.PI / 180, len: metric ? Math.round(+m[6] * FT_PER_M * 100) / 100 : +m[6], ...(metric ? { unit: 'm' } : {}) };
 }
 /** traverse calls from [0,0]; returns { pts, closure (ft misclosure) } in plan coords (x east, z south) */
 export function traverse(calls) { let p = [0, 0]; const pts = [p];
@@ -200,7 +210,10 @@ export function designOnSite(site, style = {}) {
     const cands = hb ? [{ x0: b.x0 + 3, x1: b.x1 - 3, z0: b.z0 + 3, z1: hb.z0 - 2 }, { x0: b.x0 + 3, x1: b.x1 - 3, z0: hb.z1 + 2, z1: b.z1 - 3 }, { x0: b.x0 + 3, x1: hb.x0 - 2, z0: b.z0 + 3, z1: b.z1 - 3 }, { x0: hb.x1 + 2, x1: b.x1 - 3, z0: b.z0 + 3, z1: b.z1 - 3 }] : [{ x0: b.x0 + 3, x1: b.x1 - 3, z0: b.z0 + 3, z1: b.z1 - 3 }];
     const sc = r => { const w = r.x1 - r.x0, d = r.z1 - r.z0; return w > 6 && d > 6 ? Math.min(w, d * 2.5) * Math.min(d, w * 2.5) : 0; }; R = cands.sort((p, q) => sc(q) - sc(p))[0]; }
   const yw = style.yard?.w || 50, yd = style.yard?.d || 36, rw = Math.max(8, R.x1 - R.x0), rd = Math.max(8, R.z1 - R.z0), kx = rw / yw, kz = rd / yd, cx = (R.x0 + R.x1) / 2, cz = (R.z0 + R.z1) / 2;
-  const placed = (style.items || []).filter(i => !i.existing && !i.siteId && i.kind !== 'lawn').map(i => i.kind === 'plant' ? { ...i, x: r1(cx + i.x * kx), z: r1(cz + i.z * kz) } : { ...i, x: r1(cx + i.x * kx), z: r1(cz + i.z * kz), w: r1(Math.max(1, i.w * kx)), d: r1(Math.max(1, i.d * kz)) });
+  const HS = S.shapes.find(s => s.type === 'house'), toHouse = p => { if (!HS) return p; let best = null; for (let k = 0; k < HS.pts.length; k++) { const a = HS.pts[k], b = HS.pts[(k + 1) % HS.pts.length], dx = b[0] - a[0], dz = b[1] - a[1], L = dx * dx + dz * dz, t = L ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / L)) : 0, q = [a[0] + t * dx, a[1] + t * dz], d = Math.hypot(q[0] - p[0], q[1] - p[1]); if (!best || d < best.d) best = { q, d }; } return best.q.map(r1); };
+  // v21: the walkway keeps its width and shape (scaled to the region) and its first point snaps onto the house wall nearest the path
+  const walkOn = i => { const line = i.line.map(([x, z]) => [r1(cx + x * kx), r1(cz + z * kz)]); line[0] = toHouse(line[1]); return syncWalk({ ...i, line }); };
+  const placed = (style.items || []).filter(i => !i.existing && !i.siteId && i.kind !== 'lawn').map(i => Array.isArray(i.line) ? walkOn(i) : i.kind === 'plant' ? { ...i, x: r1(cx + i.x * kx), z: r1(cz + i.z * kz) } : { ...i, x: r1(cx + i.x * kx), z: r1(cz + i.z * kz), w: r1(Math.max(1, i.w * kx)), d: r1(Math.max(1, i.d * kz)) });
   if (main) { const L = style.items?.find(i => i.kind === 'lawn'); if (L) placed.unshift({ ...L, x: r1(cx + L.x * kx), z: r1(cz + L.z * kz), w: r1(L.w * kx), d: r1(L.d * kz) }); }
   d.items = [...d.items, ...placed]; d.region = { ...R, replacedSf: main ? Math.round(area(main.pts)) : 0 }; return d;
 }

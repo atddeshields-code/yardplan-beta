@@ -36,7 +36,22 @@ const markupPct = (s, bucket) => { const m = s.markups; if (!m) return +s.markup
 
 /** buildTakeoff(design, { catalog, includeLawn=false }) — takeoff.js, but plants may carry a per-item `container` (budget-fit
  *  downsizing) so two plants of one species in different sizes are priced separately. */
+// Overnight B5/B10: clamp shapes to the yard before any quantity is computed. Negative sizes become positive; a shape that
+// runs more than 2 ft past the yard edge is trimmed to the part inside (rotated shapes: by their bounding-box fraction).
+// Small overhangs are left alone so normal plans price exactly as before. Same path for homeowner and pro.
+export function clampToYard(it, Y) {
+  if (!it || it.kind === 'plant' || it.w == null || it.d == null || Array.isArray(it.line)) return it; // v21 walkway: measured from its line
+  let w = Math.abs(+it.w || 0), d = Math.abs(+it.d || 0); const out = w !== it.w || d !== it.d ? { ...it, w, d } : it;
+  if (!Y || !(Y.w > 0) || !(Y.d > 0)) return out;
+  const a = +it.r || 0, c = Math.abs(Math.cos(a)), sn = Math.abs(Math.sin(a)), hx = (c * w + sn * d) / 2, hz = (sn * w + c * d) / 2, x = +it.x || 0, z = +it.z || 0, W = Y.w / 2, D = Y.d / 2, TOL = 2;
+  if (x - hx >= -W - TOL && x + hx <= W + TOL && z - hz >= -D - TOL && z + hz <= D + TOL) return out;
+  const x0 = Math.max(-W, x - hx), x1 = Math.min(W, x + hx), z0 = Math.max(-D, z - hz), z1 = Math.min(D, z + hz);
+  const fx = Math.max(0, x1 - x0) / Math.max(1e-9, 2 * hx), fz = Math.max(0, z1 - z0) / Math.max(1e-9, 2 * hz);
+  if (sn < 1e-6) { w *= fx; d *= fz; } else if (c < 1e-6) { w *= fz; d *= fx; } else { const k = Math.sqrt(fx * fz); w *= k; d *= k; }
+  return { ...it, x: +((x0 + x1) / 2).toFixed(2), z: +((z0 + z1) / 2).toFixed(2), w: +w.toFixed(2), d: +d.toFixed(2), clipped: true };
+}
 export function buildTakeoff(design, { catalog, includeLawn = false } = {}) {
+  design = { ...design, items: (design.items || []).map(it => clampToYard(it, design.yard)) };
   const items = design.items || [], plants = items.filter(i => i.kind === 'plant'), rest = items.filter(i => i.kind !== 'plant' && !i.existing); // existing site surfaces (auto plan / survey) aren't new work
   const base = runTakeoff({ ...design, items: [...rest, ...plants.filter(p => !p.container)] }, { catalog, includeLawn, containerSizes: design.containerSizes });
   const groups = new Map(); for (const p of plants.filter(p => p.container)) { const k = p.id + '|' + p.container; (groups.get(k) || groups.set(k, []).get(k)).push(p); }
@@ -45,7 +60,7 @@ export function buildTakeoff(design, { catalog, includeLawn = false } = {}) {
   // book.plants lookups use p.id first: keep the container lookup working for the suffixed ids
   base.totals.plantCount = base.plants.reduce((s, p) => s + p.count, 0);
   // irrigation (design.irrigation = 'drip' | 'spray'): parts from the guides generator, same lines for homeowner and pro
-  if (irrigationMode(design) !== 'none') { try { const plan = irrigationPlan(design, { catalog }); base.lines.push(...irrigationLines(plan)); base.irrigation = plan; } catch (e) { base.irrigationError = e.message; } }
+  if (irrigationMode(design) !== 'none') { try { const plan = irrigationPlan(design, { catalog }); base.lines.push(...irrigationLines(plan)); base.irrigation = plan; } catch (e) { base.irrigationError = e.message; (base.warnings ||= []).push({ level: 'warn', text: 'Irrigation could not be laid out for this plan (' + e.message + '). Add irrigation lines by hand.' }); } }
   return base;
 }
 
@@ -85,7 +100,7 @@ const sum = ls => ls.reduce((s, l) => s + l.amount, 0);
 /** homeownerEstimate(design, book, { catalog, includeLawn=false, zip, utility, turfSf, date }) ->
  *  { pro:{lines,total}, diy:{lines,total}, rebate, bid } — pro.total is the SAME number proBid() returns. */
 export function homeownerEstimate(design, book, opts = {}) {
-  const P = priceProject({ design, book, catalog: opts.catalog, includeLawn: opts.includeLawn });
+  const P = priceProject({ design, book, catalog: opts.catalog, includeLawn: opts.includeLawn ?? !!design?.includeLawn });
   const diy = diyLines(P.takeoff, book);
   const rebate = opts.turfSf ? computeRebate({ zip: opts.zip, utility: opts.utility, turfSf: opts.turfSf, date: opts.date, eligibleExpenses: opts.eligibleExpenses }) : null;
   return { pro: { lines: P.lines, total: P.total }, diy: { lines: diy, total: sum(diy) }, rebate, bid: P.bid, takeoff: P.takeoff };
@@ -93,7 +108,7 @@ export function homeownerEstimate(design, book, opts = {}) {
 /** proBid(design, book, { catalog, includeLawn=false, tiers? }) -> generateBid output + { rounded:{lines,total} }.
  *  rounded.total === homeownerEstimate(...).pro.total; bid.tiers (if requested) are optional Good/Better/Best upsells only. */
 export function proBid(design, book, opts = {}) {
-  const P = priceProject({ design, book, catalog: opts.catalog, includeLawn: opts.includeLawn });
+  const P = priceProject({ design, book, catalog: opts.catalog, includeLawn: opts.includeLawn ?? !!design?.includeLawn });
   const bid = opts.tiers ? generateBid(P.takeoff, book, { autoFees: book.settings.autoFees !== false, tiers: opts.tiers }) : P.bid;
   return { ...bid, rounded: { lines: P.lines, total: P.total } };
 }
@@ -177,8 +192,8 @@ function optionsFor(it, i, req) {
       if (canDiy) o.push({ lever: 'downsize', label: `${LADDER[k - 1]}, you plant it`, item: sm, doer: 'you', impact: imp * 0.7 }); } }
   if (it.kind === 'path') { o.push({ lever: 'swap', label: 'Decomposed granite, same shape', item: { ...it, kind: 'dg' }, doer: 'pro', impact: imp * 0.65 });
     o.push({ lever: 'swap', label: 'Gravel, same shape', item: { ...it, kind: 'gravel' }, doer: 'pro', impact: imp * 0.5 }); }
-  if (['path', 'dg', 'mulch', 'gravel'].includes(it.kind) && it.w * it.d > 120) { const f = Math.sqrt(Math.max(120 / (it.w * it.d), 0.7));
-    o.push({ lever: 'reduce', label: 'Smaller area', item: { ...it, w: +(it.w * f).toFixed(2), d: +(it.d * f).toFixed(2) }, doer: 'pro', impact: imp * 0.7 }); }
+  if (['path', 'dg', 'mulch', 'gravel'].includes(it.kind) && it.w * it.d > 120 && !(Array.isArray(it.line) && it.w <= 3.01)) { const f = Math.sqrt(Math.max(120 / (it.w * it.d), 0.7));
+    o.push({ lever: 'reduce', label: Array.isArray(it.line) ? 'Narrower walkway' : 'Smaller area', item: Array.isArray(it.line) ? { ...it, w: +Math.max(3, it.w * f * f).toFixed(2) } : { ...it, w: +(it.w * f).toFixed(2), d: +(it.d * f).toFixed(2) }, doer: 'pro', impact: imp * 0.7 }); }
   o.push({ lever: 'defer', label: 'Phase 2 (later)', item: null, doer: 'pro', impact: imp * 0.4, deferred: true });
   if (it.kind !== 'wall') o.push({ lever: 'remove', label: 'Leave out (mulch fill)', item: null, doer: 'pro', impact: 0 });
   return o;

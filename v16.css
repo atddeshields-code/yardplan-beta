@@ -3,14 +3,14 @@ body[data-chooser] .topbar,body[data-chooser] main,body[data-chooser] #nav,body[
 .chooser{min-height:100dvh;display:grid;place-items:center;padding:calc(env(safe-area-inset-top) + 32px) var(--gutter,20px) calc(env(safe-area-inset-bottom) + 32px);background:var(--bg);color:var(--text)}
 .chooser[hidden]{display:none}
 .chooser__in{width:100%;max-width:980px;text-align:center;animation:ch-in 420ms cubic-bezier(.2,.8,.2,1) both}
-.chooser__logo{display:inline-grid;place-items:center;width:52px;height:52px;border-radius:16px;background:var(--accent,#00C805);color:#fff;margin-bottom:20px}.chooser__logo svg{width:30px;height:30px}
-.chooser__eyebrow{margin:0 0 8px;font:600 13px/1 var(--font-sans);letter-spacing:.08em;text-transform:uppercase;color:var(--accent-text,#00a804)}
+.chooser__logo{display:inline-grid;place-items:center;width:52px;height:52px;border-radius:16px;background:var(--accent);color:var(--on-accent);margin-bottom:20px}.chooser__logo svg{width:30px;height:30px}
+.chooser__eyebrow{margin:0 0 8px;font:600 13px/1 var(--font-sans);letter-spacing:.08em;text-transform:uppercase;color:var(--accent-text)}
 .chooser__h{margin:0 auto 32px;max-width:16ch;font:700 34px/1.08 var(--font-sans);letter-spacing:-.025em}
 @media (min-width:744px){.chooser__h{font-size:52px;max-width:18ch;margin-bottom:44px}}
 .chooser__cards{display:grid;gap:16px;grid-template-columns:1fr;text-align:left}
 @media (min-width:744px){.chooser__cards{grid-template-columns:1fr 1fr;gap:24px}}
 .ccard{position:relative;display:flex;flex-direction:column;width:100%;padding:0;border:0;border-radius:28px;overflow:hidden;background:var(--surface);color:var(--text);font:inherit;text-align:left;cursor:pointer;box-shadow:0 1px 0 var(--border),0 12px 32px rgba(0,0,0,.06);transition:transform 220ms cubic-bezier(.2,.8,.2,1),box-shadow 220ms}
-@media (hover:hover){.ccard:hover{transform:translateY(-3px);box-shadow:0 1px 0 var(--border),0 20px 44px rgba(0,0,0,.12)}.ccard:hover .ccard__go{background:var(--accent,#00C805);color:#fff}}
+@media (hover:hover){.ccard:hover{transform:translateY(-3px);box-shadow:0 1px 0 var(--border),0 20px 44px rgba(0,0,0,.12)}.ccard:hover .ccard__go{background:var(--accent-strong);color:var(--on-accent-strong)}}
 .ccard:active{transform:scale(.985)}
 .ccard:focus-visible{outline:3px solid var(--focus,#0a84ff);outline-offset:3px}
 .ccard__media{display:block;height:180px;overflow:hidden;position:relative}
@@ -21,7 +21,7 @@ body[data-chooser] .topbar,body[data-chooser] main,body[data-chooser] #nav,body[
 .bidmock__h{font-weight:700;font-size:13px;margin-bottom:2px}
 .bidmock__row,.bidmock__total{display:flex;justify-content:space-between;font-style:normal}.bidmock i{font-style:normal}
 .bidmock__row i:last-child{color:#555;font-variant-numeric:tabular-nums}
-.bidmock__tiers{display:flex;gap:6px;margin-top:2px}.bidmock__tiers i{flex:1;text-align:center;padding:5px 0;border-radius:999px;background:#f1f1f3;font-weight:600}.bidmock__tiers i.on{background:#00C805;color:#fff}
+.bidmock__tiers{display:flex;gap:6px;margin-top:2px}.bidmock__tiers i{flex:1;text-align:center;padding:5px 0;border-radius:999px;background:#f1f1f3;font-weight:600}.bidmock__tiers i.on{background:#00C805;color:#0B0F0C}
 .bidmock__total{border-top:1px solid #eee;padding-top:8px;font-weight:700}.bidmock__total b{font-size:18px;font-variant-numeric:tabular-nums}
 .ccard__body{display:flex;flex-direction:column;gap:4px;padding:20px 72px 22px 22px}
 .ccard__kicker{font:600 12px/1 var(--font-sans);letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)}
@@ -159,7 +159,7 @@ body[data-tab=jobs] #tab-jobs .flowbar,body[data-tab=job] #tab-job .flowbar{disp
 .jhead{display:flex;align-items:center;gap:var(--space-3);margin:var(--space-2) 0 var(--space-4)}
 .prog--4{flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:0}
 .prog--4 i{display:block;height:4px;border-radius:2px;background:var(--border-strong)}
-.prog--4 i.on{background:var(--accent)}
+.prog--4 i.on{background:var(--accent-strong)}
 .iconbtn{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border:0;border-radius:var(--radius-full);background:var(--surface);color:var(--text);cursor:pointer}
 .eyebrow{font:600 var(--text-caption)/1.3 var(--font-sans);letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--text-muted);margin:0}
 .jtitle{font:700 var(--text-title1)/var(--lh-title1) var(--font-sans);letter-spacing:var(--tracking-tight);margin:var(--space-1) 0 var(--space-5)}

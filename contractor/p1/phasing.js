@@ -39,11 +39,14 @@ export function buildPhasing(bid, { phases = DEFAULT_PHASES, assignments = {} } 
   return { phases: out, assignments: asg, totals: { total: c2(out.reduce((a, p) => a + p.total, 0)), bidTotal: T.total } };
 }
 /**
- * paymentSchedule(total, { depositPct=30, phasing?, milestones? }) -> [{name, pct, amount, due}]
+ * paymentSchedule(total, { depositPct=CA cap (min $1,000 or 10%), phasing?, milestones? }) -> [{name, pct, amount, due}]
  * Default: deposit at signing, then remainder split by phase total, due on phase completion.
  * Custom milestones: [{name, pct, due?}] after the deposit; pcts must sum with deposit to 100.
  */
-export function paymentSchedule(total, { depositPct = 30, phasing = null, milestones = null, finalPct = 0 } = {}) {
+// Overnight B19: the deposit default is the California home-improvement cap — the lesser of $1,000 or 10% of the contract
+// price (Bus. & Prof. Code §7159.5; CSLB "What is a contract"). Pass depositPct to override for other states.
+export const caDepositPct = total => (total > 0 ? Math.min(10, (1000 / total) * 100) : 10);
+export function paymentSchedule(total, { depositPct = caDepositPct(total), phasing = null, milestones = null, finalPct = 0 } = {}) {
   let parts;
   if (milestones) {
     parts = [{ name: 'Deposit', pct: depositPct, due: 'At signing' }, ...milestones.map(m => ({ name: m.name, pct: +m.pct, due: m.due || 'On milestone completion' }))];
